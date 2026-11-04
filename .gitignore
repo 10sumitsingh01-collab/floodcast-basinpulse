@@ -7,3 +7,8 @@ __pycache__/
 dist/
 build/
 
+
+# BASINSHIFT data and run outputs (never commit data or labels)
+data/caravan/
+outputs/
+*.jsonl.gz
