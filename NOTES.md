@@ -6,18 +6,19 @@
 - **Lane B (`src/features.py`)**, **Lane C (`src/models.py`)**, **Lane D (`src/validate.py`, `solution.py`)**: Preserved as built, but no model training or scoring will be performed until real data is downloaded and verified.
 - **Metrics**: All metrics in `model_card.md` and `README.md` have been reset to `TBD: real data pending`. `experiments/results.csv` cleared.
 
-## Phase 1 Dataset Build & Hand-off Notes (Lane A -> Lanes B, C, D)
-- **Real Dataset Built**: 15 USGS stream stations across CONUS spanning 2000-01-01 to 2023-12-31.
-  - Train: 118,255 rows (2000-01-01 to 2021-12-31). Zero missing weather values; discharge present for all train rows.
-  - Test: 10,220 rows (2022-01-01 to 2023-12-31). Strictly no `discharge_cfs` column.
-  - Holdout Ground Truth: `data/holdout/holdout_labels.parquet` (10,220 rows) for offline evaluation by Lane D.
-- **Station Static Attributes Note for Lane B**:
-  - `drainage_area_sqmi` is 100% complete (sourced from USGS NWIS site info `drain_area_va`).
-  - `mean_elevation_ft`, `slope_pct`, `forest_cover_pct` are `NaN` for all stations because StreamStats NSS scenario endpoint only provides regional regression equations rather than delineated basin morphometrics.
-  - Extra feature available: `data/processed/station_static_extra.parquet` provides `gauge_altitude_ft` (`alt_va` from USGS NWIS). Lane B can join on `station_id` if desired.
-- **Discharge Scale Warning for Lane C**:
-  - Station `07010000` (Mississippi River at St. Louis, MO; 697,000 sq mi) has discharge up to 500,000+ cfs, whereas flashy creek `08158000` has median ~16 cfs. Target transformation (e.g. `log1p(discharge_cfs)` or basin-area normalized specific discharge `cfs / sqmi`) is strongly advised before regression modeling.
-- **Discharge Quality Codes**:
-  - Available in `data/processed/discharge_qualifiers.parquet` for any fold filtering or weight boosting.
-- **Station Review**:
-  - Station `11447650` (Sacramento River at Freeport, CA) has 5,200 valid discharge days in train (record discontinued by USGS on 2015-09-30) and 0 days in holdout period (2022-2023). Retained in train per mandatory requirement; test set has 0 rows for this station per holdout existence rule.
+## Phase 2 Dataset Build (v2) Hand-off Notes (Lane A -> Lanes B, C, D)
+- **Dataset Version**: `v2`
+- **Stations**: 14 active stations (Sacramento 11447650 dropped due to discontinued USGS NWIS record and lack of holdout observations).
+  - Train: 112,503 rows (2000-01-01 to 2021-12-31). Zero missing weather; discharge present on all rows.
+  - Test: 10,220 rows (2022-01-01 to 2023-12-31; 14 stations × 730 days). Strictly no discharge column.
+  - Holdout: 10,220 rows (1:1 ground truth).
+- **Static Attributes Update for Lane B**:
+  - `drainage_area_sqmi`: 100% complete (0 NaNs across train and test).
+  - `mean_elevation_ft`: 100% complete (0 NaNs; derived via USGS NLDI polygon + Open-Meteo elevation API).
+  - `slope_pct`: 100% complete (0 NaNs; finite difference across adjacent grid points; note: scale-dependent).
+  - `elev_range_ft` and `elev_std_ft`: 100% complete (0 NaNs; scale-invariant topographical metrics added after forest_cover_pct).
+  - `forest_cover_pct`: 100% NaN (no tabular REST zonal stats API exists).
+  - Extra features in `data/processed/station_static_extra.parquet`: `gauge_altitude_ft`, `latitude`, `longitude`, `polygon_area_sqmi`, `grid_dx_km`, `grid_dy_km`, `n_points`.
+- **Expansion Candidates**:
+  - 12 candidates verified for USGS DV and NLDI. Rebuilding with candidates requires 60 Open-Meteo archive calls after rate-limit reset.
+

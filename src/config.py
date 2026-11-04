@@ -34,6 +34,9 @@ ROOT_STATION_METADATA_PATH = DATA_DIR / "station_metadata.csv"
 PREDICTIONS_PATH = BASE_DIR / "predictions.csv"
 EXPERIMENTS_PATH = BASE_DIR / "experiments" / "results.csv"
 
+# Dataset Version
+DATA_VERSION = "v2"
+
 # Global Random Seed
 RANDOM_STATE = 42
 
@@ -57,6 +60,8 @@ CORE_FEATURE_COLS = [
     "mean_elevation_ft",
     "slope_pct",
     "forest_cover_pct",
+    "elev_range_ft",
+    "elev_std_ft",
 ]
 
 TRAIN_COLUMNS = [
@@ -95,14 +100,17 @@ SCORING_WEIGHTS = {
     "r2": 0.10,
 }
 
-# 15 Verified USGS Stations (Target: 25, Min: 12, Max: 30) spanning required hydrological regimes
+# Extreme event sample weighting defaults
+DEFAULT_WEIGHT_Q = 0.90
+DEFAULT_WEIGHT_BOOST = 5.0
+
+# 14 Verified Active USGS Stations with 100% complete records across train & holdout
 STATIONS = {
-    # 5 Mandatory Stations
+    # 4 Remaining Mandatory Stations
     "01646500": {"name": "Potomac River near Washington, DC", "region": "Mid-Atlantic", "state": "DC"},
     "07010000": {"name": "Mississippi River at St. Louis, MO", "region": "Midwest", "state": "MO"},
     "08158000": {"name": "Colorado River at Austin, TX", "region": "Southwest", "state": "TX"},
     "02087500": {"name": "Neuse River near Clayton, NC", "region": "Southeast", "state": "NC"},
-    "11447650": {"name": "Sacramento River at Freeport, CA", "region": "West", "state": "CA"},
     # New England / Northeast
     "01092000": {"name": "Merrimack River near Goffs Falls, NH", "region": "New England", "state": "NH"},
     "01184000": {"name": "Connecticut River at Thompsonville, CT", "region": "New England", "state": "CT"},
@@ -116,3 +124,19 @@ STATIONS = {
     "11264500": {"name": "Merced River at Happy Isles Bridge, CA", "region": "Sierra", "state": "CA"},
     "12119000": {"name": "Cedar River at Renton, WA", "region": "Pacific NW", "state": "WA"},
 }
+
+# 12 Verified Candidate Stations for Phase 2+ Expansion (USGS DV & NLDI verified; weather pending API reset)
+EXTRA_STATION_CANDIDATES = [
+    "11266500",  # Merced River at Pohono Bridge, CA (Sierra, 321 sq mi, Sacramento replacement)
+    "14048000",  # John Day River at McDonald Ferry, OR (Pacific NW, 7,580 sq mi, undammed)
+    "09058000",  # Colorado River near Kremmling, CO (Rocky Mountain snowmelt, 2,379 sq mi)
+    "06191500",  # Yellowstone River at Corwin Springs, MT (Northern Rockies, 2,615 sq mi)
+    "06054500",  # Missouri River at Toston, MT (Missouri headwaters, 14,641 sq mi)
+    "08155200",  # Barton Creek at SH 71 nr Oak Hill, TX (Southwest flashy, 89.7 sq mi)
+    "01643000",  # Monocacy River at Jug Bridge, MD (Mid-Atlantic, 817 sq mi)
+    "02320500",  # Suwannee River at Branford, FL (Humid Southeast, 7,880 sq mi)
+    "02105500",  # Cape Fear River at Huske Lock, NC (Southeast, 4,852 sq mi)
+    "03335500",  # Wabash River at Lafayette, IN (Midwest plains, 7,267 sq mi)
+    "06892350",  # Kansas River at DeSoto, KS (Midwest mega-basin, 59,756 sq mi)
+    "05378500",  # Mississippi River at Winona, MN (Upper Mississippi mega-basin, 59,200 sq mi)
+]

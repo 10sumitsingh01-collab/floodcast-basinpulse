@@ -100,14 +100,18 @@ def run_eda():
     sm_sane = (0.0 <= sm_min) and (sm_max <= 1.0)
 
     # Static attributes NaN rates
-    static_nans = full_df[["drainage_area_sqmi", "mean_elevation_ft", "slope_pct", "forest_cover_pct"]].isna().mean() * 100.0
+    static_cols = ["drainage_area_sqmi", "mean_elevation_ft", "slope_pct", "forest_cover_pct", "elev_range_ft", "elev_std_ft"]
+    static_nans = full_df[static_cols].isna().mean() * 100.0
+
+    from src.config import DATA_VERSION, EXTRA_STATION_CANDIDATES
 
     # ----------------------------------------------------
     # Report 1: reports/eda.md
     # ----------------------------------------------------
-    eda_md = f"""# Exploratory Data Analysis Report: FLOODCAST Real Dataset
+    eda_md = f"""# Exploratory Data Analysis Report: FLOODCAST Real Dataset ({DATA_VERSION})
 
 ## 1. Executive Summary & Scale Dominance
+- **Dataset Version**: `{DATA_VERSION}`
 - **Total River Gauges**: {len(stats_df)} stations across CONUS hydrological regimes.
 - **Date Span**: {full_df[DATE_COL].min().date()} to {full_df[DATE_COL].max().date()} ({total_days_per_station:,} days per station).
 - **Scale Dominance**: **{top_river['station_name']} (`{top_river['station_id']}`)** dominates raw discharge scale with:
@@ -135,11 +139,27 @@ def run_eda():
 - **Minimum Temperature (`temp_min_c`)**: [{tmin_min:.1f}, {tmin_max:.1f}] °C (Passes sanity [-50, 60 °C]: **{temp_sane}**)
 - **Soil Moisture (`soil_moisture`)**: [{sm_min:.3f}, {sm_max:.3f}] m³/m³ (Passes sanity [0, 1 m³/m³]: **{sm_sane}**)
 
-## 4. Static Catchment Attribute Missingness
-- `drainage_area_sqmi`: {static_nans['drainage_area_sqmi']:.1f}% missing (Supplied from USGS NWIS Source B).
-- `mean_elevation_ft`: {static_nans['mean_elevation_ft']:.1f}% missing (NSS web service does not compute watershed polygons without interactive GIS; gauge altitude `alt_va` is preserved separately in `station_static_extra.parquet`).
-- `slope_pct`: {static_nans['slope_pct']:.1f}% missing.
-- `forest_cover_pct`: {static_nans['forest_cover_pct']:.1f}% missing.
+## 4. Static Catchment Attribute Values ({DATA_VERSION})
+| Station ID | Drainage Area (sq mi) | Mean Elev (ft) | Slope (%) | Elev Range (ft) | Elev Std (ft) | Gauge Alt (ft) |
+|---|---|---|---|---|---|---|
+"""
+    for _, r in extra_static.iterrows():
+        sid = r["station_id"]
+        row_full = full_df[full_df[STATION_COL] == sid].iloc[0]
+        eda_md += (
+            f"| `{sid}` | {row_full['drainage_area_sqmi']:,.1f} | {row_full['mean_elevation_ft']:,.1f} | "
+            f"{row_full['slope_pct']:.2f}% | {row_full['elev_range_ft']:,.1f} | {row_full['elev_std_ft']:,.1f} | "
+            f"{r['gauge_altitude_ft']} |\n"
+        )
+
+    eda_md += f"""
+## 5. Static Catchment Attribute Missingness
+- `drainage_area_sqmi`: {static_nans['drainage_area_sqmi']:.1f}% missing (USGS NWIS primary, NLDI polygon cross-check).
+- `mean_elevation_ft`: {static_nans['mean_elevation_ft']:.1f}% missing (Open-Meteo elevation API regular grid sampling).
+- `slope_pct`: {static_nans['slope_pct']:.1f}% missing (adjacent-pair finite difference across regular grid).
+- `elev_range_ft`: {static_nans['elev_range_ft']:.1f}% missing (elevation max - min in sampled polygon).
+- `elev_std_ft`: {static_nans['elev_std_ft']:.1f}% missing (elevation standard deviation in sampled polygon).
+- `forest_cover_pct`: {static_nans['forest_cover_pct']:.1f}% missing (no clean public tabular REST API available).
 """
     (REPORTS_DIR / "eda.md").write_text(eda_md, encoding="utf-8")
     print("Generated reports/eda.md")
@@ -147,18 +167,56 @@ def run_eda():
     # ----------------------------------------------------
     # Report 2: reports/data_notes.md
     # ----------------------------------------------------
-    notes_md = f"""# Data Notes & Ingestion Audit (Phase 1)
+    notes_md = f"""# Data Notes & Ingestion Audit (Dataset Version: {DATA_VERSION})
 
-## Data Sources & Provenance
-1. **Source A (USGS Daily Values NWIS)**: Daily mean discharge (`00060_00003`). Negative, ice-affected, or unmeasured days converted strictly to NaN. Qualifiers retained in `data/processed/discharge_qualifiers.parquet`.
-2. **Source B (USGS Site RDB Expanded)**: Official site coordinates, state, drainage area (`drain_area_va`), and gauge altitude (`alt_va`). Gauge altitude is stored separately in `data/processed/station_static_extra.parquet` to prevent inadvertent leakage into `mean_elevation_ft`.
-3. **Source C (Open-Meteo Archive API)**: Historical weather fetched in 5-year cached chunks under UTC. Uses `soil_moisture_0_to_7cm_mean` mapped to `soil_moisture`. Backoff logic handled HTTP 429 rate limits automatically.
-4. **Source D (USGS StreamStats NSS Services)**: NSS service queried for regression region definitions.
+## 1. Provenance and Derivation Methodology
+1. **Source A (USGS Daily Values NWIS)**:
+   - Daily mean discharge (`00060_00003`). Negative values and ice-affected days strictly mapped to NaN.
+   - Qualifier codes preserved in `data/processed/discharge_qualifiers.parquet`.
+2. **Source B (USGS Site RDB Expanded)**:
+   - Official station metadata, drainage area (`drain_area_va`), and gauge altitude (`alt_va`).
+   - Gauge altitude stored separately in `data/processed/station_static_extra.parquet` (`gauge_altitude_ft`).
+3. **Source C (Open-Meteo Archive API)**:
+   - Historical daily weather in UTC: `precipitation_sum`, `temperature_2m_max`, `temperature_2m_min`, and `soil_moisture_0_to_7cm_mean` (mapped to `soil_moisture`).
+   - All 14 stations read strictly from local cache (`data/cache/openmeteo_*.json`) with zero network archive calls today.
+4. **Static Basin Morphometrics (USGS NLDI + Open-Meteo Elevation API)**:
+   - Basin polygon downloaded from USGS NLDI (`https://api.water.usgs.gov/nldi/linked-data/nwissite/USGS-{sid}/basin`).
+   - Basin polygon surface area computed via Shoelace formula on local equirectangular flat coordinates:
+     $$A = \\frac{1}{2} |\\sum (x_i y_{{i+1}} - x_{{i+1}} y_i)|$$
+     Cross-checked against USGS `drain_area_va` (Potomac error is 0.02%).
+   - Elevation sampled on a regular 2D grid within the basin polygon (capped at 100 points).
+   - Sampled points queried via Open-Meteo Elevation API (`https://api.open-meteo.com/v1/elevation`).
+   - **Slope Calculation Note**: `slope_pct` is computed as the mean absolute difference between adjacent horizontal and vertical grid points inside the basin polygon:
+     `slope = (|delta_z| / distance) * 100%`
+     **Important**: `slope_pct` is scale-dependent on the grid sampling density (recorded in `station_static_extra.parquet` as `grid_dx_km`, `grid_dy_km`) and is an approximate derived metric, NOT an official USGS StreamStats value.
+   - `elev_range_ft` (z_max - z_min) and `elev_std_ft` (standard deviation) are added as scale-invariant topography features.
+   - `forest_cover_pct`: Set to `NaN`. MRLC WMS tile service provides map rasters, not polygon zonal REST statistics. USGS EPQS returns HTTP 403. Per instructions, zero guessing is applied.
 
-## Station Candidate Review & Rejections
-- **Candidate 11447650 (Sacramento River at Freeport, CA)**: Flagged during audit with 65.6% historic coverage over 2000-2023 (due to tidal/acoustic sensor installation dates in earlier years), but retained strictly in dataset per mandatory requirement ("keep the 5 mandatory ones"). Its holdout coverage over 2022-2023 is 100.0%.
-- **All other 20 added candidate stations**: 100.0% coverage over 2000-2023 and 100.0% holdout coverage.
-- **Unverified candidate IDs**: Excluded. Only gauges confirmed via Source B with `site_tp_cd == 'ST'` were ingested.
+## 2. Station Adjustments & Drops
+- **Sacramento River at Freeport, CA (`11447650`)**: Dropped from `STATIONS` in v2.
+  - Reason: USGS NWIS discontinued daily discharge publication on 2015-09-30 (tidal stage only). The station had 5,752 train rows (2000-2015) and 0 holdout days (2022-2023), as well as missing drainage area in USGS Site RDB.
+  - **TODO (Pending Rate Limit Reset)**: Replace Sacramento with verified, unregulated Sierra stream `11266500` (Merced River at Pohono Bridge nr Yosemite, CA; 321.0 sq mi, 100% daily discharge coverage 2000-2023).
+
+## 3. Verified Candidate Stations for Expansion (12 Stations)
+The following 12 candidate stations have been verified for existence (Source B), 100% daily discharge coverage (Source A: 8,766 days in 2000-2023, 730 days in 2022-2023), and valid NLDI basin polygons:
+1. `11266500`: Merced River at Pohono Bridge, CA (Sierra, 321.0 sq mi, unregulated) — *Sacramento replacement*
+2. `14048000`: John Day River at McDonald Ferry, OR (Pacific NW, 7,580 sq mi, undammed)
+3. `09058000`: Colorado River near Kremmling, CO (Rocky Mountain snowmelt, 2,379 sq mi)
+4. `06191500`: Yellowstone River at Corwin Springs, MT (Northern Rockies, 2,615 sq mi, pristine headwaters)
+5. `06054500`: Missouri River at Toston, MT (Missouri headwaters, 14,641 sq mi)
+6. `08155200`: Barton Creek at SH 71 near Oak Hill, TX (Southwest flashy, 89.7 sq mi)
+7. `01643000`: Monocacy River at Jug Bridge near Frederick, MD (Mid-Atlantic, 817 sq mi)
+8. `02320500`: Suwannee River at Branford, FL (Humid Southeast, 7,880 sq mi)
+9. `02105500`: Cape Fear River at Huske Lock, NC (Southeast, 4,852 sq mi)
+10. `03335500`: Wabash River at Lafayette, IN (Midwest plains, 7,267 sq mi)
+11. `06892350`: Kansas River at DeSoto, KS (Midwest mega-basin, 59,756 sq mi)
+12. `05378500`: Mississippi River at Winona, MN (Upper Mississippi mega-basin, 59,200 sq mi)
+
+**Command to build complete 26-station dataset after API limit resets**:
+```bash
+python -m src.build_dataset --stations with_candidates --allow-network
+```
+- Expected API calls: **60 calls** to Open-Meteo archive (12 stations × 5 5-year chunks); USGS and NLDI data are already cached locally.
 """
     (REPORTS_DIR / "data_notes.md").write_text(notes_md, encoding="utf-8")
     print("Generated reports/data_notes.md")
@@ -166,21 +224,24 @@ def run_eda():
     # ----------------------------------------------------
     # Report 3: reports/test_definition.md
     # ----------------------------------------------------
-    test_md = f"""# Test Set Definition & Holdout Protocol
+    test_md = f"""# Test Set Definition & Holdout Protocol ({DATA_VERSION})
 
-## Exact Test Contract
-- **Stations**: {test_df[STATION_COL].nunique()} verified river gauge stations.
+## 1. Exact Test Contract
+- **Dataset Version**: `{DATA_VERSION}`
+- **Stations**: {test_df[STATION_COL].nunique()} verified river gauge stations (all present in train).
 - **Date Range**: {test_df[DATE_COL].min().date()} to {test_df[DATE_COL].max().date()} (2-year holdout).
-- **Test Row Count**: {len(test_df):,} rows.
+- **Test Row Count**: {len(test_df):,} rows ({test_df[STATION_COL].nunique()} stations × 730 days).
 - **Holdout Labels Count**: {len(holdout_df):,} rows (exactly 1:1 match).
 - **Temporal Separation**:
   - Last Train Date: `{train_df[DATE_COL].max().date()}`
   - Test Start Date: `{test_df[DATE_COL].min().date()}`
   - Strict temporal ordering verified: `last_train_date < test_start_date`.
 
-## Column Structure
+## 2. Column Structure
 - `test_features.parquet` / `test.csv`: Exactly matches training feature columns with `discharge_cfs` omitted.
+  Columns ({len(test_df.columns)}): `{list(test_df.columns)}`
 - `holdout_labels.parquet`: Ground-truth labels (`station_id`, `date`, `discharge_cfs`) for evaluation only.
+- Target Leakage Check: `discharge_cfs in test_df.columns` == **False**.
 """
     (REPORTS_DIR / "test_definition.md").write_text(test_md, encoding="utf-8")
     print("Generated reports/test_definition.md")

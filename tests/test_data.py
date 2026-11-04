@@ -156,3 +156,31 @@ def test_corrupted_frame_cases_trip_assertions():
     with pytest.raises(AssertionError, match="leaked into test"):
         if TARGET_COL in bad_test.columns:
             raise AssertionError("discharge_cfs leaked into test features!")
+
+
+def test_static_attributes_contract():
+    """Phase 2 static attributes assertions:
+    - drainage_area_sqmi has 0 NaNs
+    - Every test station appears in train
+    - forest_cover_pct may be 100% NaN, all other static columns < 5% NaN
+    """
+    train = load_train()
+    test = load_test()
+
+    # 1. drainage_area_sqmi has 0 NaNs
+    assert train["drainage_area_sqmi"].isna().sum() == 0, "drainage_area_sqmi contains NaNs in train"
+    assert test["drainage_area_sqmi"].isna().sum() == 0, "drainage_area_sqmi contains NaNs in test"
+
+    # 2. Every test station appears in train
+    train_stations = set(train[STATION_COL].unique())
+    test_stations = set(test[STATION_COL].unique())
+    assert test_stations.issubset(train_stations), f"Test stations missing from train: {test_stations - train_stations}"
+    assert train_stations == test_stations, f"Train and test stations should match exactly: {train_stations ^ test_stations}"
+
+    # 3. All static columns except forest_cover_pct must be < 5% NaN
+    static_cols = ["drainage_area_sqmi", "mean_elevation_ft", "slope_pct", "elev_range_ft", "elev_std_ft"]
+    for col in static_cols:
+        trn_nan_pct = train[col].isna().mean() * 100.0
+        tst_nan_pct = test[col].isna().mean() * 100.0
+        assert trn_nan_pct < 5.0, f"Column {col} has {trn_nan_pct:.2f}% NaNs in train (expected < 5%)"
+        assert tst_nan_pct < 5.0, f"Column {col} has {tst_nan_pct:.2f}% NaNs in test (expected < 5%)"

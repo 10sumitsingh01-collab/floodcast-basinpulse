@@ -59,6 +59,8 @@ def _enforce_contract_types(df: pd.DataFrame, is_test: bool = False) -> pd.DataF
         "mean_elevation_ft",
         "slope_pct",
         "forest_cover_pct",
+        "elev_range_ft",
+        "elev_std_ft",
     ]
     for c in num_cols:
         if c in df.columns:

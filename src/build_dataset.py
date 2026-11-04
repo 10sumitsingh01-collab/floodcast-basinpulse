@@ -17,6 +17,7 @@ Enforces zero-fabrication:
 import argparse
 import json
 import logging
+import math
 import re
 import sys
 import time
@@ -225,8 +226,11 @@ def fetch_source_a_discharge(site_no: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     return q_df, qual_df
 
 
-def fetch_source_c_weather(site_no: str, lat: float, lon: float) -> pd.DataFrame:
-    """Fetch Open-Meteo weather in 5-year chunks (Source C)."""
+def fetch_source_c_weather(site_no: str, lat: float, lon: float, allow_network: bool = False) -> pd.DataFrame:
+    """Fetch Open-Meteo weather in 5-year chunks (Source C).
+    
+    In Phase 2, strictly uses cached weather files to avoid exceeding 429 rate limits.
+    """
     chunks = [
         ("2000-01-01", "2004-12-31"),
         ("2005-01-01", "2009-12-31"),
@@ -238,14 +242,22 @@ def fetch_source_c_weather(site_no: str, lat: float, lon: float) -> pd.DataFrame
     chunk_dfs = []
     for s_date, e_date in chunks:
         cache_file = CACHE_DIR / f"openmeteo_{site_no}_{s_date}_{e_date}.json"
-        url = (
-            f"https://archive-api.open-meteo.com/v1/archive?latitude={lat:.4f}&longitude={lon:.4f}"
-            f"&start_date={s_date}&end_date={e_date}"
-            f"&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,soil_moisture_0_to_7cm_mean&timezone=UTC"
-        )
-        content = fetch_with_retry(url, cache_file, timeout=25, max_retries=4, backoff_sleep=60)
-        data = json.loads(content)
+        if not cache_file.exists():
+            if not allow_network:
+                raise FileNotFoundError(
+                    f"Weather cache missing for station {site_no} chunk {s_date}..{e_date} "
+                    f"at {cache_file}. Network archive calls are disabled per rate-limit rules."
+                )
+            url = (
+                f"https://archive-api.open-meteo.com/v1/archive?latitude={lat:.4f}&longitude={lon:.4f}"
+                f"&start_date={s_date}&end_date={e_date}"
+                f"&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,soil_moisture_0_to_7cm_mean&timezone=UTC"
+            )
+            content = fetch_with_retry(url, cache_file, timeout=25, max_retries=4, backoff_sleep=60)
+        else:
+            content = cache_file.read_text(encoding="utf-8")
 
+        data = json.loads(content)
         daily = data.get("daily", {})
         times = daily.get("time", [])
         precip = daily.get("precipitation_sum", [])
@@ -262,62 +274,196 @@ def fetch_source_c_weather(site_no: str, lat: float, lon: float) -> pd.DataFrame
             "soil_moisture": pd.to_numeric(soil, errors="coerce").astype(float),
         })
         chunk_dfs.append(df_chunk)
-        time.sleep(0.15)  # respectful pacing
 
     weather_df = pd.concat(chunk_dfs, ignore_index=True)
     weather_df = weather_df.drop_duplicates(subset=[STATION_COL, DATE_COL])
     return weather_df
 
 
-def fetch_source_d_streamstats(site_no: str, state: str, meta: Dict[str, Any], timeout_s: int = 90) -> Dict[str, float]:
-    """Query StreamStats NSS services for static catchment attributes (Source D).
+def points_in_polygons(pts: np.ndarray, polys: List[np.ndarray]) -> np.ndarray:
+    """Vectorized point-in-polygons test using ray-casting."""
+    x, y = pts[:, 0], pts[:, 1]
+    inside = np.zeros(len(pts), dtype=bool)
+    for poly in polys:
+        px, py = poly[:, 0], poly[:, 1]
+        n = len(poly)
+        p_inside = np.zeros(len(pts), dtype=bool)
+        for i in range(n):
+            j = (i + 1) % n
+            xi, yi = px[i], py[i]
+            xj, yj = px[j], py[j]
+            intersect = ((yi > y) != (yj > y)) & (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi)
+            p_inside ^= intersect
+        inside |= p_inside
+    return inside
 
-    Time-boxed at 90s max per station.
-    Returns:
-      dict with drainage_area_sqmi, mean_elevation_ft, slope_pct, forest_cover_pct
+
+def fetch_static_basin_attributes(site_no: str, meta: Dict[str, Any]) -> Tuple[Dict[str, float], Dict[str, Any]]:
+    """Compute static catchment attributes via USGS NLDI and Open-Meteo Elevation API.
+    
+    Computes:
+      - drainage_area_sqmi: primary from USGS drain_area_va, polygon area as check
+      - mean_elevation_ft: sampled regular grid inside polygon (capped at ~100 pts)
+      - slope_pct: mean absolute slope across adjacent grid pairs
+      - elev_range_ft: max elevation - min elevation (feet)
+      - elev_std_ft: standard deviation of elevation (feet)
+      - forest_cover_pct: NaN (no clean REST API available)
     """
-    cache_file = CACHE_DIR / f"streamstats_nss_{state}.json"
-    url = f"https://streamstats.usgs.gov/nssservices/scenarios?rcode={state}"
+    nldi_file = CACHE_DIR / f"nldi_basin_{site_no}.json"
+    if not nldi_file.exists():
+        url = f"https://api.water.usgs.gov/nldi/linked-data/nwissite/USGS-{site_no}/basin"
+        content = fetch_with_retry(url, nldi_file, timeout=35)
+    else:
+        content = nldi_file.read_text(encoding="utf-8")
 
-    attrs: Dict[str, float] = {
-        "drainage_area_sqmi": meta.get("drain_area_va", np.nan),
-        "mean_elevation_ft": np.nan,
-        "slope_pct": np.nan,
+    data = json.loads(content)
+    geom = data.get("features", [{}])[0].get("geometry", {})
+    gtype = geom.get("type", "")
+
+    polys = []
+    if gtype == "Polygon":
+        polys.append(np.array(geom["coordinates"][0]))
+    elif gtype == "MultiPolygon":
+        for p in geom["coordinates"]:
+            polys.append(np.array(p[0]))
+    else:
+        logger.warning(f"No valid geometry for station {site_no} in NLDI response.")
+        return {
+            "drainage_area_sqmi": meta.get("drain_area_va", np.nan),
+            "mean_elevation_ft": np.nan,
+            "slope_pct": np.nan,
+            "forest_cover_pct": np.nan,
+            "elev_range_ft": np.nan,
+            "elev_std_ft": np.nan,
+        }, {
+            "station_id": str(site_no).zfill(8),
+            "gauge_altitude_ft": meta.get("alt_va", np.nan),
+            "latitude": meta["latitude"],
+            "longitude": meta["longitude"],
+            "polygon_area_sqmi": np.nan,
+            "grid_dx_km": np.nan,
+            "grid_dy_km": np.nan,
+            "n_points": 0,
+        }
+
+    # Polygon Area via Shoelace on local projection
+    R = 6371008.8
+    total_area_m2 = 0.0
+    for poly in polys:
+        lons, lats = poly[:, 0], poly[:, 1]
+        lon_c, lat_c = np.mean(lons), np.mean(lats)
+        x = np.radians(lons - lon_c) * R * np.cos(np.radians(lat_c))
+        y = np.radians(lats - lat_c) * R
+        total_area_m2 += 0.5 * np.abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
+    poly_area_sqmi = total_area_m2 / (1609.344 ** 2)
+
+    # Regular grid sampling
+    all_pts = np.vstack(polys)
+    min_lon, min_lat = all_pts.min(axis=0)
+    max_lon, max_lat = all_pts.max(axis=0)
+    grid_n = 15
+    lon_steps = np.linspace(min_lon, max_lon, grid_n)
+    lat_steps = np.linspace(min_lat, max_lat, grid_n)
+    LON, LAT = np.meshgrid(lon_steps, lat_steps)
+    grid_pts = np.column_stack([LON.ravel(), LAT.ravel()])
+    mask_2d = points_in_polygons(grid_pts, polys).reshape(grid_n, grid_n)
+
+    lat_mean = (min_lat + max_lat) / 2.0
+    dx = (lon_steps[1] - lon_steps[0]) * (math.pi / 180.0) * R * math.cos(math.radians(lat_mean))
+    dy = (lat_steps[1] - lat_steps[0]) * (math.pi / 180.0) * R
+
+    inside_indices = np.where(mask_2d)
+    inside_lats = lat_steps[inside_indices[0]]
+    inside_lons = lon_steps[inside_indices[1]]
+
+    n_inside = len(inside_lats)
+    if n_inside > 100:
+        sub_idx = np.linspace(0, n_inside - 1, 100, dtype=int)
+        sampled_lats = inside_lats[sub_idx]
+        sampled_lons = inside_lons[sub_idx]
+    else:
+        sub_idx = np.arange(n_inside)
+        sampled_lats = inside_lats
+        sampled_lons = inside_lons
+
+    # Elevation query with caching & throttling
+    elev_file = CACHE_DIR / f"elevation_{site_no}.json"
+    if not elev_file.exists():
+        time.sleep(1.0)
+        lats_str = ",".join(f"{lt:.4f}" for lt in sampled_lats)
+        lons_str = ",".join(f"{ln:.4f}" for ln in sampled_lons)
+        url = f"https://api.open-meteo.com/v1/elevation?latitude={lats_str}&longitude={lons_str}"
+        elev_content = fetch_with_retry(url, elev_file, timeout=30)
+    else:
+        elev_content = elev_file.read_text(encoding="utf-8")
+
+    elev_data = json.loads(elev_content)
+    elevs_m = np.array(elev_data.get("elevation", []))
+
+    if len(elevs_m) > 0:
+        mean_elev_ft = float(np.mean(elevs_m) * 3.28084)
+        elev_range_ft = float((np.max(elevs_m) - np.min(elevs_m)) * 3.28084)
+        elev_std_ft = float(np.std(elevs_m) * 3.28084)
+
+        elev_grid = np.full((grid_n, grid_n), np.nan)
+        for k, (r, c) in enumerate(zip(inside_indices[0][sub_idx], inside_indices[1][sub_idx])):
+            elev_grid[r, c] = elevs_m[k]
+
+        slopes = []
+        for r in range(grid_n):
+            for c in range(grid_n - 1):
+                if not np.isnan(elev_grid[r, c]) and not np.isnan(elev_grid[r, c + 1]):
+                    slopes.append(abs(elev_grid[r, c + 1] - elev_grid[r, c]) / dx * 100.0)
+        for r in range(grid_n - 1):
+            for c in range(grid_n):
+                if not np.isnan(elev_grid[r, c]) and not np.isnan(elev_grid[r + 1, c]):
+                    slopes.append(abs(elev_grid[r + 1, c] - elev_grid[r, c]) / dy * 100.0)
+
+        slope_pct = float(np.mean(slopes)) if slopes else np.nan
+    else:
+        mean_elev_ft = np.nan
+        elev_range_ft = np.nan
+        elev_std_ft = np.nan
+        slope_pct = np.nan
+
+    drain_area_val = meta.get("drain_area_va")
+    drain_area = (
+        float(drain_area_val)
+        if drain_area_val is not None and not np.isnan(float(drain_area_val)) and float(drain_area_val) > 0
+        else poly_area_sqmi
+    )
+
+    attrs = {
+        "drainage_area_sqmi": drain_area,
+        "mean_elevation_ft": mean_elev_ft,
+        "slope_pct": slope_pct,
         "forest_cover_pct": np.nan,
+        "elev_range_ft": elev_range_ft,
+        "elev_std_ft": elev_std_ft,
     }
 
-    try:
-        t0 = time.time()
-        content = fetch_with_retry(url, cache_file, timeout=min(timeout_s, 30))
-        data = json.loads(content)
+    extra_static = {
+        "station_id": str(site_no).zfill(8),
+        "gauge_altitude_ft": meta.get("alt_va", np.nan),
+        "latitude": meta["latitude"],
+        "longitude": meta["longitude"],
+        "polygon_area_sqmi": float(poly_area_sqmi),
+        "grid_dx_km": float(dx / 1000.0),
+        "grid_dy_km": float(dy / 1000.0),
+        "n_points": int(len(elevs_m)),
+    }
 
-        # Scenarios parameters metadata inspection
-        param_dict = {}
-        for scen in data:
-            for rr in scen.get("regressionRegions", []):
-                for p in rr.get("parameters", []):
-                    code = p.get("code")
-                    unit = p.get("unit")
-                    param_dict[code] = p
-
-        logger.info(f"  StreamStats NSS ({state}) returned {len(param_dict)} parameter definitions in {time.time()-t0:.2f}s")
-        # In NSS services, actual computed point values are unavailable without interactive GIS delineation.
-        # As instructed: Anything unavailable stays NaN and is logged.
-        # Do NOT substitute gauge altitude (alt_va) into mean_elevation_ft.
-    except Exception as e:
-        logger.warning(f"  StreamStats NSS ({state}) unavailable: {e}. Keeping static attributes as NaN.")
-
-    return attrs
+    return attrs, extra_static
 
 
-def build_all_dataset(stations_to_process: Optional[List[str]] = None) -> None:
+def build_all_dataset(stations_to_process: Optional[List[str]] = None, allow_network: bool = False) -> None:
     """Build the complete, verified, real dataset across all stations."""
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     HOLDOUT_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     station_list = stations_to_process or list(STATIONS.keys())
-    logger.info(f"Starting Phase 1 Dataset Build for {len(station_list)} stations...")
+    logger.info(f"Starting Dataset Build (v2) for {len(station_list)} stations...")
 
     all_station_data = []
     metadata_records = []
@@ -345,16 +491,13 @@ def build_all_dataset(stations_to_process: Optional[List[str]] = None) -> None:
             "state": meta["state"],
             "river_name": meta["river_name"],
         })
-        extra_static_records.append({
-            "station_id": meta["station_id"],
-            "gauge_altitude_ft": meta["alt_va"],
-        })
 
-        # 2. Source D: StreamStats Static Catchment Attributes
-        st_attrs = fetch_source_d_streamstats(site_no, meta["state"], meta)
+        # 2. Static Catchment Attributes via NLDI + Elevation API
+        st_attrs, extra_meta = fetch_static_basin_attributes(site_no, meta)
+        extra_static_records.append(extra_meta)
 
         # 3. Source C: Weather spine (every date 2000-01-01..2023-12-31)
-        weather_df = fetch_source_c_weather(site_no, meta["latitude"], meta["longitude"])
+        weather_df = fetch_source_c_weather(site_no, meta["latitude"], meta["longitude"], allow_network=allow_network)
 
         # Enforce exact spine dates
         spine_df = pd.DataFrame({
@@ -373,7 +516,14 @@ def build_all_dataset(stations_to_process: Optional[List[str]] = None) -> None:
         assert len(station_df) == expected_days_per_station, f"Discharge merge changed row count for {site_no}!"
 
         # Attach static attributes
-        for col in ["drainage_area_sqmi", "mean_elevation_ft", "slope_pct", "forest_cover_pct"]:
+        for col in [
+            "drainage_area_sqmi",
+            "mean_elevation_ft",
+            "slope_pct",
+            "forest_cover_pct",
+            "elev_range_ft",
+            "elev_std_ft",
+        ]:
             station_df[col] = float(st_attrs.get(col, np.nan))
         assert len(station_df) == expected_days_per_station, f"Static merge changed row count for {site_no}!"
 
@@ -455,15 +605,46 @@ def build_all_dataset(stations_to_process: Optional[List[str]] = None) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Build real FLOODCAST dataset")
-    parser.add_argument("--stations", type=str, default="all", help="'all' or comma-separated list of station IDs")
+    parser.add_argument(
+        "--stations",
+        type=str,
+        default="all",
+        help="'all' (14 active stations), 'with_candidates' (active + 12 candidates), or comma-separated IDs",
+    )
+    parser.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="Allow calling Open-Meteo archive API for missing weather chunks",
+    )
     args = parser.parse_args()
+
+    from src.config import EXTRA_STATION_CANDIDATES
 
     if args.stations == "all":
         st_list = list(STATIONS.keys())
+    elif args.stations == "with_candidates":
+        st_list = list(STATIONS.keys()) + list(EXTRA_STATION_CANDIDATES)
+        # Calculate missing API calls
+        missing_weather_chunks = 0
+        chunks = [
+            ("2000-01-01", "2004-12-31"),
+            ("2005-01-01", "2009-12-31"),
+            ("2010-01-01", "2014-12-31"),
+            ("2015-01-01", "2019-12-31"),
+            ("2020-01-01", "2023-12-31"),
+        ]
+        for s in st_list:
+            for s_date, e_date in chunks:
+                if not (CACHE_DIR / f"openmeteo_{s}_{s_date}_{e_date}.json").exists():
+                    missing_weather_chunks += 1
+        logger.info(
+            f"Candidate expansion selected: {len(st_list)} stations total. "
+            f"Missing weather cache chunks to fetch: {missing_weather_chunks} API calls."
+        )
     else:
         st_list = [s.strip().zfill(8) for s in args.stations.split(",")]
 
-    build_all_dataset(st_list)
+    build_all_dataset(st_list, allow_network=args.allow_network)
 
 
 if __name__ == "__main__":
