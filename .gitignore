@@ -1,9 +1,7 @@
-.venv/
+data/cache/
+data/raw/
+*.zip
 __pycache__/
-*.pyc
+.venv/
 .pytest_cache/
 .DS_Store
-*.egg-info/
-dist/
-build/
-
