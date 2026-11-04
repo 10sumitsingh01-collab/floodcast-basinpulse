@@ -1,0 +1,17 @@
+{
+  "run": "lgbm_final",
+  "model": "src.bs_models:RobustMeanModel",
+  "commit": "72500f8-dirty",
+  "utc": "2026-11-04T20:40:02+00:00",
+  "data_manifest_ok": true,
+  "seed": 42,
+  "n_boot": 200,
+  "fit_seconds": 291.1,
+  "predict_seconds": 242.9,
+  "total_seconds": 2263.1,
+  "memory_mb": null,
+  "python": "3.13.14",
+  "machine": "Windows-11-10.0.26200-SP0",
+  "n_train_rows": 2357018,
+  "n_test_origins": 1246829
+}

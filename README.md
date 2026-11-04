@@ -40,16 +40,33 @@ elevation, slope and forest cover ([split summary](docs/SPLIT_SUMMARY.md), [map]
 All numbers come from logged runs (`experiments/`) with their commit hash. Full tables with 95% bootstrap
 confidence intervals: `outputs/<run>/REPORT.md`.
 
-Persistence baseline on `geo_temporal` (60 unseen basins, later years):
+**Headline: `geo_temporal`, 60 basins never seen in training, years after the training period.**
+Final model (`RobustMeanModel`) vs persistence, scored once on the test set after every choice was made on
+validation ([experiments](docs/EXPERIMENTS.md)). 95% confidence intervals from resampling basins.
 
-| | h=1 | h=3 | h=7 |
+| | 1 day | 3 days | 7 days |
 |---|---|---|---|
-| NSE (median over basins) | 0.49 | −0.17 | −0.43 |
-| High-flow AUPRC | 0.61 | 0.27 | 0.16 |
-| 10–90% range coverage (target 0.80) | 0.80 | 0.80 | 0.80 |
+| NSE, median over basins | 0.49 → **0.63** [0.58, 0.75] | −0.17 → **0.30** [0.20, 0.37] | −0.43 → **0.15** [0.12, 0.21] |
+| High-flow AUPRC | 0.61 → **0.81** | 0.27 → **0.45** | 0.16 → **0.28** |
+| Extreme-flow AUPRC | 0.19 → **0.49** | 0.06 → **0.14** | 0.03 → **0.07** |
+| Brier skill (high flow) | 0.51 → **0.65** | 0.22 → **0.31** | 0.13 → **0.20** |
+| Alert precision at p ≥ 0.5 | 0.67 → **0.85** | n/a → **0.76** | n/a → **0.71** |
+| False alarms per basin-year | 5.6 → **2.0** | 0 → 1.2 | 0 → 0.7 |
+| 10–90% range coverage (target 0.80) | 0.80 → **0.81** | 0.80 → **0.80** | 0.80 → **0.79** |
+| 10–90% range width (mm/day) | 0.67 → 0.89 | 1.78 → **1.59** | 2.87 → **1.99** |
+| MAE (mm/day) | 0.50 → **0.37** | 0.90 → **0.74** | 1.14 → **0.90** |
 
-LightGBM model: **TBD**. Filled in from the final run, scored once on the test set after all model choices
-were made on validation.
+Same picture on the other test sets (`temporal`: NSE 0.68 / 0.26 / 0.15; `geo`: 0.66 / 0.28 / 0.17).
+Full tables: `outputs/lgbm_final/REPORT.md`; figures in `docs/figures/`; failure analysis in
+[docs/FAILURE_ANALYSIS.md](docs/FAILURE_ANALYSIS.md).
+
+**What we learned** (validation, [details](docs/EXPERIMENTS.md)):
+- Predicting the *change* from the river's own current flow transfers well: unseen-basin skill is close to
+  seen-basin skill.
+- **H1:** catchment attributes add small, consistent gains (within confidence intervals).
+- **H4:** training with 15% of inputs hidden makes the model much more robust to missing data
+  (1-day NSE with 30% of inputs missing: 0.52 → 0.59) at almost no clean cost.
+- **Ungauged basins:** with no flow data at all, the model still beats persistence at 3 and 7 days.
 
 ## How to run
 
@@ -75,13 +92,13 @@ python scripts/caravan/check_leakage.py --package data/caravan
 
 ### 3. Validate a model (training data only, no test labels)
 ```bash
-python basinshift_run.py --validate --folds 0,1 --model src.bs_models:BasinshiftModel --name val_lgbm
+python basinshift_run.py --validate --folds 0,1 --model src.bs_models:RobustMeanModel --name val_final
 ```
-Scores unseen-basin folds and the last two training years: `outputs/val_lgbm/VALIDATION.md`.
+Scores unseen-basin folds and the last two training years: `outputs/val_final/VALIDATION.md`.
 
 ### 4. Final run on the test set
 ```bash
-python basinshift_run.py --model src.bs_models:BasinshiftModel --name lgbm_final
+python basinshift_run.py --model src.bs_models:RobustMeanModel --name lgbm_final
 ```
 Trains on all training basins, writes the BASINSHIFT 8.3 submission (`submission.jsonl.gz`), validates it against
 the 8.4 rules, scores it, runs 5 stress tests and writes `outputs/lgbm_final/REPORT.md`.
@@ -98,18 +115,27 @@ no feature or prediction uses data from after its forecast date.
 ```
 basinshift_run.py            one command: data → model → submission → validation → scores → stress → report
 src/
-  bs_models.py               LightGBM model + features (Lane C), ablation variants
+  bs_models.py               features + LightGBM model; final = RobustMeanModel; ablation variants
   baselines.py               calibrated persistence reference
   evaluate.py                BASINSHIFT section 10 metrics, basin-bootstrap CIs, reliability tables
   submission.py              section 8.3 JSON writer, 8.4 validator
   stress.py                  5 input-corruption scenarios (7.5)
-scripts/caravan/             fetch, prepare, leakage audit, split summary (Lane A)
+scripts/
+  caravan/                   fetch, prepare, leakage audit, split summary (data)
+  summarize_validation.py    docs/EXPERIMENTS.md from all validation runs
+  failure_analysis.py        docs/FAILURE_ANALYSIS.md: which basins are hard
+  make_figures.py            docs/figures/
 docs/
+  TECHNICAL_REPORT.md        report following BASINSHIFT 12.1, with defense answers
+  MODEL_CARD.md              intended use, results, limitations
+  EXPERIMENTS.md             every validation experiment and the decision it led to
+  FAILURE_ANALYSIS.md        per-basin skill vs catchment characteristics
+  PRESENTATION.md            slide outline, talking points, defense one-liners
+  figures/                   hydrographs, skill by horizon, reliability, stress
   DATA_README.md             columns, units, rules
   DATA_PROVENANCE.md         sources, licenses, citations, transformations
   SPLIT_SUMMARY.md, basin_map.png   are the held-out basins representative?
   BASINSHIFT_EVALUATION.md   metrics, model interface, stress scenarios
-  TECHNICAL_REPORT.md        report following BASINSHIFT 12.1, with draft defense answers
 tests/                       test_basinshift_eval.py, test_bs_models.py (+ legacy FLOODCAST tests)
 data/caravan/                the data package (gitignored)
 outputs/                     run outputs (gitignored)

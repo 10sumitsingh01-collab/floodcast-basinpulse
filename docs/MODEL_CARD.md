@@ -41,10 +41,28 @@ recall / precision / false alarms per basin-year at probability 0.5, 10–90% ra
 pinball loss; 95% confidence intervals from resampling basins. Definitions: `docs/BASINSHIFT_EVALUATION.md`.
 
 ## Results
-FINAL_RESULTS_PLACEHOLDER
+Final model `src.bs_models:RobustMeanModel`, scored once on the test set (`outputs/lgbm_final/REPORT.md`).
+Headline set `geo_temporal` (60 basins never used in training, 2008-10 to 2014-09); persistence in brackets.
+
+| | 1 day | 3 days | 7 days |
+|---|---|---|---|
+| NSE, median over basins | 0.63 (0.49) | 0.30 (−0.17) | 0.15 (−0.43) |
+| KGE, median over basins | 0.70 (0.74) | 0.33 (0.42) | 0.15 (0.28) |
+| MAE, mm/day | 0.37 (0.50) | 0.74 (0.90) | 0.90 (1.14) |
+| High-flow AUPRC | 0.81 (0.61) | 0.45 (0.27) | 0.28 (0.16) |
+| Extreme-flow AUPRC | 0.49 (0.19) | 0.14 (0.06) | 0.07 (0.03) |
+| Brier skill, high flow | 0.65 (0.51) | 0.31 (0.22) | 0.20 (0.13) |
+| 10–90% range coverage (target 0.80) | 0.81 (0.80) | 0.80 (0.80) | 0.79 (0.80) |
+
+Seen basins in later years (`temporal`): NSE 0.68 / 0.26 / 0.15. Unseen basins, training years (`geo`):
+0.66 / 0.28 / 0.17. Confidence intervals and event counts: `docs/TECHNICAL_REPORT.md` sections 7–8.
+Ungauged variant (no flow input), validation only: NSE 0.33 / 0.13 / 0.07, still above persistence beyond 1 day.
 
 ## Robustness
-STRESS_PLACEHOLDER
+Test set, unseen basins, 1-day horizon, change in median NSE vs clean inputs (persistence in brackets):
+10% of inputs missing −3% (−6%); 30% missing −9% (−33%); 3–7 day gaps −9% (−14%); weather noise −2% (0%);
+latest flow 1 day late −26% (−94%). At 3 and 7 days no scenario costs more than 13%. Weak point: with late flow
+data the 1-day range covers only 60% instead of 80%. Details: `docs/TECHNICAL_REPORT.md` section 9.
 
 ## Limitations and risks
 - **One country:** CAMELS-US basins only, mostly small-to-medium natural catchments (median 330 km²). No evidence
@@ -57,7 +75,10 @@ STRESS_PLACEHOLDER
   weather, which has larger errors.
 - **Thresholds** are statistical (95th / 99th percentile), not official flood stages, and say nothing about
   flood depth, extent or damage.
-- **Late or missing observations** degrade the short-horizon forecast most (see robustness).
+- **Late or missing observations** degrade the short-horizon forecast most; a stale flow reading makes the
+  1-day range over-confident (see robustness).
+- **Sharp peaks** are underestimated in height by the point forecast; use the high-flow probability for alerts.
+- **KGE** is below persistence: forecasts hedge toward the expected value and are smoother than real flow.
 
 ## Ethical considerations
 Wrong confidence in a flood forecast can cause harm in both directions (missed floods, alarm fatigue).
