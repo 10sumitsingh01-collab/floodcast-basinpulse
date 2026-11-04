@@ -75,3 +75,4 @@ if __name__ == "__main__":
     w_df = fetch_openmeteo_weather(38.9498, -77.1276, "2020-01-01", "2020-01-03")
     merged = pd.merge(q_df, w_df, on="date", how="inner")
     print(merged)
+
