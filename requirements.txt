@@ -6,4 +6,5 @@ xgboost
 optuna
 pyarrow
 pytest
-
+scipy
+matplotlib
