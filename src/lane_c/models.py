@@ -61,7 +61,7 @@ from sklearn.metrics import (
     recall_score,
 )
 
-from src.config import (
+from src.lane_c.config import (
     CARAVAN_TARGET_COL,
     CARAVAN_TARGET_UNITS,
     DATA_V2_TARGET_UNITS,
@@ -81,8 +81,11 @@ from src.config import (
     STATION_COL,
     TARGET_COL,
 )
-from src.features import FEATURE_COLS, build_features
-from src.validate import forward_folds, loso_folds
+try:  # Lane C's own validation helpers use the earlier FLOODCAST features/folds (now in legacy/)
+    from src.features import FEATURE_COLS, build_features
+    from src.validate import forward_folds, loso_folds
+except ImportError:  # the BASINSHIFT pipeline feeds this model through src/lane_c_adapter.py instead
+    FEATURE_COLS, build_features, forward_folds, loso_folds = [], None, None, None
 
 
 def _sanitize_n_jobs(n_jobs: Optional[int] = None) -> int:
