@@ -78,11 +78,19 @@ def main() -> int:
     ap.add_argument("--n-boot", type=int, default=200)
     ap.add_argument("--no-stress", action="store_true")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--validate", action="store_true",
+                    help="score on splits.json validation (unseen-basin folds + last 2 train years); "
+                         "never touches test.parquet or test labels")
+    ap.add_argument("--folds", default="all", help="station folds to use with --validate, e.g. 0,1")
+    ap.add_argument("--val-stress", action="store_true",
+                    help="with --validate: also run the 5 stress scenarios on the temporal validation split")
     a = ap.parse_args()
     name = a.name or a.model.replace(":", "_").replace(".", "_")
     out = ROOT / "outputs" / name
     out.mkdir(parents=True, exist_ok=True)
     t_all = time.time()
+    if a.validate:
+        return run_validation(a, out)
 
     bad = check_package(a.data)
     if bad:
@@ -157,7 +165,106 @@ def main() -> int:
     return 0
 
 
-def write_report(out: Path, run: dict, metrics: pd.DataFrame, stress_df: pd.DataFrame | None) -> None:
+TARGETS = ["streamflow_h1", "streamflow_h3", "streamflow_h7"]
+HORIZON_DAYS = {"streamflow_h1": 1, "streamflow_h3": 3, "streamflow_h7": 7}
+
+
+def run_validation(a, out: Path) -> int:
+    """Validation on TRAIN data only (splits.json), so models can be compared without the test set.
+
+    val_unseen_basins: for each station fold, fit on the other folds, predict the held-out basins.
+    val_temporal: fit on dates <= fit_end (targets reaching past fit_end removed), predict the last 2 years.
+    """
+    t_all = time.time()
+    train = pd.read_parquet(a.data / "train.parquet")
+    static = pd.read_parquet(a.data / "static.parquet")
+    thr = pd.read_csv(a.data / "thresholds.csv", dtype={ID: str})
+    thr_val = pd.read_csv(a.data / "thresholds_val.csv", dtype={ID: str})
+    splits = json.loads((a.data / "splits.json").read_text())
+    fit, predict = load_model(a.model)
+    inputs = [c for c in train.columns if c not in ["streamflow"] + TARGETS]
+    preds_all, labels_all, timings = [], [], {}
+
+    folds = splits["station_folds"]
+    use = sorted(set(folds.values())) if a.folds == "all" else [int(x) for x in a.folds.split(",")]
+    for k in use:
+        t0 = time.time()
+        held = {g for g, f in folds.items() if f == k}
+        tr = train[~train[ID].isin(held)]
+        va = train[train[ID].isin(held)]
+        model = fit(tr, static, thr)
+        p = predict(model, va[inputs], tr, static, thr)
+        p[ID] = p[ID].astype(str)
+        submission.assert_valid(p, va[[ID, DATE]])
+        preds_all.append(p)
+        labels_all.append(va[[ID, DATE] + TARGETS].assign(test_set="val_unseen_basins"))
+        timings[f"fold_{k}_seconds"] = round(time.time() - t0, 1)
+        print(f"fold {k}: {len(held)} basins, {time.time() - t0:.0f} s", flush=True)
+
+    t0 = time.time()
+    fit_end = pd.Timestamp(splits["temporal_validation"]["fit_end_inclusive"])
+    tr = train[train[DATE] <= fit_end].copy()
+    for col, h in HORIZON_DAYS.items():  # a target on t+h after fit_end would be a validation label
+        tr.loc[tr[DATE] + pd.Timedelta(days=h) > fit_end, col] = float("nan")
+    va = train[train[DATE] > fit_end]
+    model = fit(tr, static, thr_val)
+    p = predict(model, va[inputs], tr, static, thr_val)
+    p[ID] = p[ID].astype(str)
+    submission.assert_valid(p, va[[ID, DATE]])
+    timings["temporal_seconds"] = round(time.time() - t0, 1)
+    print(f"temporal: {time.time() - t0:.0f} s", flush=True)
+    va_labels = va[[ID, DATE] + TARGETS].assign(test_set="val_temporal")
+
+    stress_df = None
+    if a.val_stress:   # robustness on validation data: same fitted model, corrupted validation inputs
+        key = ["nse_median", "mae_pooled", "auprc_high", "brier_high", "interval_coverage"]
+        clean_m, _ = evaluate.score(p, va_labels, thr_val, n_boot=0, seed=a.seed)
+        clean = clean_m[clean_m.metric.isin(key)].set_index(["test_set", "horizon", "metric"])["value"]
+        rows = []
+        for sc in stress.SCENARIOS:
+            ps = predict(model, stress.perturb(va[inputs], sc, seed=a.seed), tr, static, thr_val)
+            ps[ID] = ps[ID].astype(str)
+            submission.assert_valid(ps, va[[ID, DATE]])
+            m, _ = evaluate.score(ps, va_labels, thr_val, n_boot=0, seed=a.seed)
+            m = m[m.metric.isin(key)].set_index(["test_set", "horizon", "metric"])["value"]
+            d = pd.DataFrame({"clean": clean, "stressed": m}).reset_index()
+            d["scenario"] = sc
+            d["relative_change"] = (d["stressed"] - d["clean"]) / d["clean"].abs()
+            rows.append(d)
+            print(f"validation stress {sc}: done", flush=True)
+        stress_df = pd.concat(rows)
+        stress_df.to_csv(out / "validation_stress.csv", index=False)
+
+    # score unseen-basin folds and temporal split separately (different thresholds files)
+    m1, r1 = evaluate.score(pd.concat(preds_all), pd.concat(labels_all), thr, n_boot=a.n_boot, seed=a.seed)
+    m2, r2 = evaluate.score(p, va_labels, thr_val, n_boot=a.n_boot, seed=a.seed)
+    metrics = pd.concat([m1, m2], ignore_index=True)
+    metrics.to_csv(out / "validation_metrics.csv", index=False)
+    run = {"run": a.name or a.model, "model": a.model, "commit": git_commit(),
+           "utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "mode": "validation",
+           "folds": use, "seed": a.seed, "n_boot": a.n_boot, **timings,
+           "fit_seconds": "see folds", "predict_seconds": "see folds",
+           "total_seconds": round(time.time() - t_all, 1)}
+    (out / "validation_run.json").write_text(json.dumps(run, indent=2), encoding="utf-8")
+    write_report(out, run, metrics, stress_df, sets=["val_unseen_basins", "val_temporal"], fname="VALIDATION.md",
+                 stress_slice="val_temporal")
+    log = ROOT / "experiments" / "basinshift_validation.csv"
+    log.parent.mkdir(exist_ok=True)
+    v = metrics.set_index(["test_set", "horizon", "metric"])["value"]
+    row = {k: run[k] for k in ("utc", "commit", "run", "model", "total_seconds")}
+    row["folds"] = ",".join(map(str, use))
+    for ts in ("val_unseen_basins", "val_temporal"):
+        for h in (1, 3, 7):
+            for mname in ("nse_median", "auprc_high", "brier_skill_high", "interval_coverage"):
+                row[f"{ts}_h{h}_{mname}"] = v.get((ts, h, mname))
+    pd.DataFrame([row]).to_csv(log, mode="a", header=not log.exists(), index=False)
+    print(f"\nValidation report: {out / 'VALIDATION.md'}")
+    return 0
+
+
+def write_report(out: Path, run: dict, metrics: pd.DataFrame, stress_df: pd.DataFrame | None,
+                 sets=("temporal", "geo", "geo_temporal"), fname: str = "REPORT.md",
+                 stress_slice: str = "geo_temporal") -> None:
     show = ["nse_median", "kge_median", "mae_pooled", "auprc_high", "auprc_extreme", "brier_skill_high",
             "recall_high", "precision_high", "false_alarms_per_basin_year_high", "interval_coverage",
             "interval_width"]
@@ -170,7 +277,7 @@ def write_report(out: Path, run: dict, metrics: pd.DataFrame, stress_df: pd.Data
              f"Model `{run['model']}`, commit `{run['commit']}`, {run['utc']}. "
              f"Fit {run['fit_seconds']} s, predict {run['predict_seconds']} s, total {run['total_seconds']} s.", "",
              "Values with 95% bootstrap CIs (resampling basins). Event counts are horizon-specific.", ""]
-    for ts in ["temporal", "geo", "geo_temporal"]:
+    for ts in sets:
         sub = metrics[metrics.test_set == ts]
         if sub.empty:
             continue
@@ -185,14 +292,14 @@ def write_report(out: Path, run: dict, metrics: pd.DataFrame, stress_df: pd.Data
         ev = sub[sub.metric == "auprc_high"].set_index("horizon")["n_events"]
         lines += ["", f"High-flow events: " + ", ".join(f"h={h}: {int(v):,}" for h, v in ev.items()), ""]
     if stress_df is not None:
-        s = stress_df[(stress_df.test_set == "geo_temporal") & (stress_df.horizon == 1)]
+        s = stress_df[(stress_df.test_set == stress_slice) & (stress_df.horizon == 1)]
         piv = s.pivot(index="scenario", columns="metric", values="relative_change")
-        lines += ["## Stress tests (geo_temporal, h=1): relative change vs clean", "",
+        lines += [f"## Stress tests ({stress_slice}, h=1): relative change vs clean", "",
                   "| scenario | " + " | ".join(piv.columns) + " |", "|---|" + "---|" * len(piv.columns)]
         for sc, r in piv.iterrows():
             lines.append(f"| {sc} | " + " | ".join(f"{v:+.1%}" for v in r) + " |")
         lines += ["", "Scenarios: " + "; ".join(f"`{k}` = {v}" for k, v in stress.SCENARIOS.items()), ""]
-    (out / "REPORT.md").write_text("\n".join(lines), encoding="utf-8")
+    (out / fname).write_text("\n".join(lines), encoding="utf-8")
 
 
 if __name__ == "__main__":

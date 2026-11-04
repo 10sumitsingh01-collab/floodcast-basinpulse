@@ -16,7 +16,7 @@ Column meanings and rules: [DATA_README.md](DATA_README.md).
 ## Run the evaluation
 ```bash
 python basinshift_run.py                                   # reference persistence baseline
-python basinshift_run.py --model src.models:BasinshiftModel --name lgbm_v1   # a Lane C model
+python basinshift_run.py --model src.bs_models:RobustMeanModel --name lgbm_final   # final model
 ```
 Outputs in `outputs/<name>/`: `REPORT.md`, `metrics.csv`, `stress.csv`, `reliability_high.csv`,
 `predictions.parquet`, `submission.jsonl.gz` (the 8.3 format), `run.json` (commit, timings).
