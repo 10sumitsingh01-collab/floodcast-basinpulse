@@ -45,7 +45,8 @@ class BasinshiftModel:
     def __init__(self, seed: int = 42, max_rows: int = 300_000, cal_frac: float = 0.2,
                  use_static: bool = True, use_flow_history: bool = True, n_estimators: int = 300,
                  point: str = "median", mask_frac: float = 0.0, delay_frac: float = 0.0,
-                 chunk_threshold: int = 6_000_000, chunk_basins: int = 40):
+                 chunk_threshold: int = 6_000_000, chunk_basins: int = 40, lgb_params: dict | None = None):
+        self.lgb_overrides = dict(lgb_params or {})   # e.g. {"num_leaves": 127}; empty = validated defaults
         # above chunk_threshold training rows, features are built a few basins at a time (memory); the
         # in-memory path below is used otherwise and is unchanged from the validated runs
         self.chunk_threshold, self.chunk_basins = chunk_threshold, chunk_basins
@@ -184,7 +185,7 @@ class BasinshiftModel:
             r_c = np.log1p(np.clip(Yc[:, j], 0, None)) - ac
             for q in QUANTILES:
                 m = lgb.LGBMRegressor(objective="quantile", alpha=q,
-                                      **_lgb_params(self.seed, n_estimators=self.n_estimators))
+                                      **_lgb_params(self.seed, n_estimators=self.n_estimators, **getattr(self, 'lgb_overrides', {})))
                 m.fit(Xf, r_f)
                 self.reg[(h, q)] = m
             lo, hi = self.reg[(h, 0.1)].predict(Xc), self.reg[(h, 0.9)].predict(Xc)
@@ -194,7 +195,7 @@ class BasinshiftModel:
             self.cqr[h] = float(np.quantile(score, min(1.0, np.ceil((n + 1) * 0.8) / n)))
             if self.point == "mean":
                 m = lgb.LGBMRegressor(objective="regression",
-                                      **_lgb_params(self.seed, n_estimators=self.n_estimators))
+                                      **_lgb_params(self.seed, n_estimators=self.n_estimators, **getattr(self, 'lgb_overrides', {})))
                 m.fit(Xf, r_f)
                 self.reg[(h, "mean")] = m
                 # Duan smearing: E[exp(r)] = exp(pred) * mean(exp(residual)), estimated on calibration basins
@@ -203,7 +204,8 @@ class BasinshiftModel:
                 lab_f = (Yf[:, j] > tf[e]).astype(int)
                 lab_c = (Yc[:, j] > tc[e]).astype(int)
                 c = lgb.LGBMClassifier(objective="binary",
-                                       **_lgb_params(self.seed, n_estimators=int(self.n_estimators * 0.8)))
+                                       **_lgb_params(self.seed, n_estimators=int(self.n_estimators * 0.8),
+                                                     **getattr(self, 'lgb_overrides', {})))
                 c.fit(Xf, lab_f)
                 raw = c.predict_proba(Xc)[:, 1]
                 self.clf[(h, ev)] = c

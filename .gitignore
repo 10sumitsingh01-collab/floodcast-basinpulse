@@ -16,3 +16,4 @@ data/transfer_lamah/
 data/caravan_extra/
 outputs/**/model.joblib
 data/final_*/
+models/*.joblib

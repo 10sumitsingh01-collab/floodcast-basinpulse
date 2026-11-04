@@ -102,6 +102,8 @@ def main() -> int:
                     help="score on splits.json validation (unseen-basin folds + last 2 train years); "
                          "never touches test.parquet or test labels")
     ap.add_argument("--folds", default="all", help="station folds to use with --validate, e.g. 0,1")
+    ap.add_argument("--no-temporal", action="store_true",
+                    help="with --validate: unseen-basin folds only (faster, for tuning)")
     ap.add_argument("--val-stress", action="store_true",
                     help="with --validate: also run the 5 stress scenarios on the temporal validation split")
     ap.add_argument("--extra-train", type=Path, default=None,
@@ -267,6 +269,18 @@ def run_validation(a, out: Path) -> int:
         labels_all.append(va[[ID, DATE] + TARGETS].assign(test_set="val_unseen_basins"))
         timings[f"fold_{k}_seconds"] = round(time.time() - t0, 1)
         print(f"fold {k}: {len(held)} basins, {time.time() - t0:.0f} s", flush=True)
+
+    if a.no_temporal:
+        m1, _ = evaluate.score(pd.concat(preds_all), pd.concat(labels_all), thr, n_boot=a.n_boot, seed=a.seed)
+        m1.to_csv(out / "validation_metrics.csv", index=False)
+        run = {"run": a.name or a.model, "model": a.model, "commit": git_commit(), "mode": "validation-folds-only",
+               "utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "folds": use, **timings,
+               "fit_seconds": "see folds", "predict_seconds": "see folds",
+               "total_seconds": round(time.time() - t_all, 1)}
+        (out / "validation_run.json").write_text(json.dumps(run, indent=2), encoding="utf-8")
+        write_report(out, run, m1, None, sets=["val_unseen_basins"], fname="VALIDATION.md")
+        print(f"\nValidation report: {out / 'VALIDATION.md'}")
+        return 0
 
     t0 = time.time()
     fit_end = pd.Timestamp(splits["temporal_validation"]["fit_end_inclusive"])
