@@ -193,8 +193,25 @@ snow fraction 0.36, NSE −4.2) is an outlier worth inspecting; one such basin m
 - Research benchmark only: not for evacuation, emergency response or public warnings (16.1).
 
 ## 11. Reproduction instructions and artifact references
-See `docs/BASINSHIFT_EVALUATION.md`: rebuild data, check hashes, run `python basinshift_run.py --model ...`.
-Artifacts: data package sha256 (in `basinshift_caravan_v1.sha256.txt`), commit hash per run.
+```bash
+pip install -r requirements.txt
+# data: unzip basinshift_caravan_v1.zip into data/caravan/ (sha256 45a4bba1…f27e849), or rebuild it with
+# scripts/caravan/{fetch_caravan,prepare_caravan,check_leakage}.py (see README)
+python basinshift_run.py --validate --folds 0,1 --model src.bs_models:RobustMeanModel --name val_final
+python basinshift_run.py --model src.bs_models:RobustMeanModel --name lgbm_final
+pytest tests/test_basinshift_eval.py tests/test_bs_models.py
+```
+
+**Fresh-clone test (2026-11-05).** The branch was cloned from GitHub into an empty folder, the shared data zip
+was unzipped (hash verified), and:
+- all 24 tests passed;
+- `basinshift_run.py` with the final model reproduced the final run's predictions **bit for bit**: all
+  3,740,487 rows identical in every column (max absolute difference 0). Seed 42 and fixed thread count make
+  LightGBM training deterministic on the same machine.
+
+**Artifacts:** final and validation metric tables in `docs/results/`; run metadata (commit, timings) in
+`docs/results/final_run.json` and `experiments/*.csv`; data package hashes in `prep_manifest.json`;
+15-check leakage audit in `LEAKAGE_REPORT.md`.
 
 ---
 
