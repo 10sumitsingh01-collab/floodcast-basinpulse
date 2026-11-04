@@ -104,6 +104,95 @@ SCORING_WEIGHTS = {
 DEFAULT_WEIGHT_Q = 0.90
 DEFAULT_WEIGHT_BOOST = 5.0
 
+# BASINSHIFT Model Configuration (Lane C)
+HORIZONS = (1, 3, 7)
+QUANTILES = (0.10, 0.50, 0.90)
+FLOOD_THRESHOLDS = {
+    "q_high": 0.95,
+    "q_extreme": 0.99,
+}
+MAX_N_JOBS = 4
+CARAVAN_TARGET_COL = "streamflow"
+CARAVAN_TARGET_UNITS = "mm/day"
+DATA_V2_TARGET_UNITS = "cfs"
+
+STATIC_RAW_FEATURE_COLS = (
+    "drainage_area_sqmi",
+    "mean_elevation_ft",
+    "slope_pct",
+    "forest_cover_pct",
+    "elev_range_ft",
+    "elev_std_ft",
+)
+STATIC_DERIVED_FEATURE_COLS = (
+    "log_drainage_area",
+    "relief_ratio",
+    "concentration_time_proxy",
+    "precip_volume",
+    "log_precip_volume",
+    "precip_soil_volume",
+    "basin_effective_storm",
+    "forest_attenuation",
+)
+STATIC_FEATURE_COLS = STATIC_RAW_FEATURE_COLS + STATIC_DERIVED_FEATURE_COLS
+
+EXPERIMENT_LOG_COLUMNS = (
+    "experiment_id",
+    "timestamp",
+    "status",
+    "error_message",
+    "commit",
+    "description",
+    "model_config",
+    "feature_set",
+    "n_features",
+    "validation_strategy",
+    "random_seed",
+    "target_col",
+    "target_units",
+    "horizon",
+    "n_eval",
+    "mae",
+    "rmse",
+    "persistence_mae",
+    "persistence_rmse",
+    "climatology_mae",
+    "climatology_rmse",
+    "skill_mae_vs_persistence",
+    "skill_mae_vs_climatology",
+    "pinball_q10",
+    "pinball_q50",
+    "pinball_q90",
+    "mean_pinball_loss",
+    "interval_coverage_80",
+    "interval_width_80",
+    "n_pos_q_high",
+    "pos_rate_q_high",
+    "precision_q_high",
+    "recall_q_high",
+    "f1_q_high",
+    "brier_q_high",
+    "brier_raw_q_high",
+    "cal_mae_q_high",
+    "n_pos_q_extreme",
+    "pos_rate_q_extreme",
+    "precision_q_extreme",
+    "recall_q_extreme",
+    "f1_q_extreme",
+    "brier_q_extreme",
+    "brier_raw_q_extreme",
+    "cal_mae_q_extreme",
+    "ablation_delta_mae",
+    "ablation_rel_gain_pct_mae",
+    "ablation_delta_rmse",
+    "ablation_delta_mean_pinball_loss",
+    "ablation_delta_f1_q_high",
+    "ablation_delta_f1_q_extreme",
+    "ablation_delta_brier_q_high",
+    "ablation_delta_brier_q_extreme",
+    "ablation_delta_interval_coverage_80",
+)
+
 # 14 Verified Active USGS Stations with 100% complete records across train & holdout
 STATIONS = {
     # 4 Remaining Mandatory Stations
