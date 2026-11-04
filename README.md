@@ -10,7 +10,7 @@ BasinPulse predicts daily river discharge (`discharge_cfs`) across diverse US ri
 ```
 ├── src/
 │   ├── config.py         # Shared constants, paths, and competition parameters
-│   ├── data.py           # Lane A: Data loading, schema enforcement, starter generator
+│   ├── data.py           # Lane A: Data loading, schema enforcement (real data only)
 │   ├── features.py       # Lane B: Hydrological feature pipeline (zero target leakage)
 │   ├── models.py         # Lane C: Peak-boosted sample weighting & ensemble models
 │   └── validate.py       # Lane D: Forward CV, LOSO CV, scoring, finalize & verification
@@ -22,10 +22,9 @@ BasinPulse predicts daily river discharge (`discharge_cfs`) across diverse US ri
 │   ├── test_models.py    # Unit tests for Lane C
 │   └── test_validate.py  # Unit tests for Lane D
 ├── experiments/
-│   └── results.csv       # Append-only experiment tracking log
-├── predictions.csv       # Submission output (exact test coverage, non-negative cfs)
+│   └── results.csv       # Append-only experiment tracking log (real data only)
 ├── requirements.txt      # Core project dependencies
-├── model_card.md         # Comprehensive model card and validation metrics
+├── model_card.md         # Comprehensive model card (benchmarks: TBD: real data pending)
 └── NOTES.md              # Cross-lane architectural log
 ```
 
@@ -43,23 +42,13 @@ Verify all lane interfaces, dtypes, schemas, and pipeline integrity:
 ```bash
 python tests/smoke.py
 ```
-Or run the full test suite with pytest:
+Or run the unit test suite with pytest:
 ```bash
 pytest tests/
 ```
 
-### 3. Run Solution Pipeline
-To train models, run forward validation, and generate `predictions.csv`:
+### 3. Run Solution Pipeline (Once real data is in place)
 ```bash
 python solution.py
 ```
-
-Optional flags:
-- Fast iteration mode: `python solution.py --quick`
-- Run Leave-One-Station-Out (LOSO) spatial CV: `python solution.py --loso`
-
-### 4. Verify Submission
-The orchestrator automatically validates `predictions.csv` upon completion. You can also run:
-```bash
-python -c "from src.validate import validate_submission; validate_submission('predictions.csv', 'data/test.csv'); print('Submission valid!')"
-```
+*(Requires real `data/train.csv` and `data/test.csv`)*

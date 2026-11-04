@@ -206,3 +206,4 @@ def predict(bundle: Dict[str, Any], X: pd.DataFrame, df: pd.DataFrame) -> np.nda
         )
 
     return preds
+

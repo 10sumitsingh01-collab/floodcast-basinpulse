@@ -225,3 +225,4 @@ def validate_submission(path: str | Path, test_path: str | Path) -> None:
     assert not np.isnan(preds).any(), "predictions.csv contains NaN values"
     assert not np.isinf(preds).any(), "predictions.csv contains Infinite values"
     assert (preds >= 0.0).all(), "predictions.csv contains negative values"
+

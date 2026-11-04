@@ -59,3 +59,4 @@ def test_build_features_row_order_preservation():
 
     assert len(feats) == len(train)
     pd.testing.assert_index_equal(feats.index, train.index)
+

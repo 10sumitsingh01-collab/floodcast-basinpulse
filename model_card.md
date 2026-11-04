@@ -45,11 +45,10 @@ A total of 49 features derived strictly from allowable test-time inputs (`precip
 Zero target leakage: No features ever reference `discharge_cfs`.
 
 ## Validation & Benchmark Results
-Evaluated using forward-chaining temporal cross-validation with a 30-day purging buffer to simulate real test-period forecasting:
-- **Pooled Temporal CV RMSE**: ~7.91M cfs (on high-capacity multi-state basins like Mississippi River)
-- **Top-10% Flood Event RMSE**: ~13.01M cfs
-- **Overall MAE**: ~2.84M cfs
-- **R² Score**: 0.9647
+- **Pooled Temporal CV RMSE**: TBD: real data pending
+- **Top-10% Flood Event RMSE**: TBD: real data pending
+- **Overall MAE**: TBD: real data pending
+- **R² Score**: TBD: real data pending
 
 ## Known Limitations
 1. **Unregulated River Assumption**: Dams, reservoirs, and human-managed floodgates introduce anthropogenic retention delays not captured by pure meteorology.

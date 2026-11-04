@@ -57,3 +57,4 @@ def test_fit_and_predict_interface():
     assert not np.isnan(preds).any()
     assert not np.isinf(preds).any()
     assert (preds >= 0.0).all()
+

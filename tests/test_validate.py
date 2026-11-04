@@ -93,3 +93,4 @@ def test_finalize_and_validate_submission(tmp_path):
 
     with pytest.raises(AssertionError):
         validate_submission(bad_file, test_file)
+
