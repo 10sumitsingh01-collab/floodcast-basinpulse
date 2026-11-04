@@ -14,19 +14,44 @@ percentile flow over 1981-2008. Main hypothesis (H1): static catchment attribute
 basins never seen in training. Secondary (H4): training with missing inputs improves robustness.
 
 ## 3. Dataset and feature provenance
-Caravan v1.6 (CSV, CC-BY-4.0), CAMELS-US subset: observed USGS daily streamflow, ERA5-Land
-basin-averaged weather, HydroATLAS attributes. 671 basins downloaded, 611 passed QA (coverage >= 90% of
-the train period, >= 50% of the test period, weather <= 5% missing), 299 sampled in proportion to 14
-USGS regions. See `docs/DATA_README.md`, `basin_selection.csv`, `PREP_REPORT.md`.
-Features: TBD (Lane B, `src/features.py`).
+**Source.** Caravan v1.6 (CSV, CC-BY-4.0), CAMELS-US subset: observed USGS daily streamflow (mm/day,
+already normalised by catchment area), 10 ERA5-Land basin-averaged daily weather variables, and HydroATLAS
+catchment attributes. Full source register and citations: `docs/DATA_PROVENANCE.md`.
+
+**Selection.** 671 basins downloaded; 611 passed QA (observed flow covering >= 90% of 1981-2008 and
+>= 50% of 2008-2014, weather <= 5% missing); 60 excluded with the reason recorded per basin. 299 basins
+were sampled in proportion to the 14 USGS regions; 60 of them are held out entirely.
+
+**Benchmark size.** 2,357,018 training origins (239 basins, median 27.0 years of observed flow each);
+1,246,829 test origins: 523,649 `temporal`, 591,720 `geo`, 131,460 `geo_temporal`. At the 1-day horizon
+the test sets contain 25,573 / 29,271 / 5,976 high-flow days and 5,329 / 5,874 / 1,243 extreme days.
+
+**Representativeness (7.3).** Held-out and training basins have similar distributions of area, aridity,
+precipitation, elevation, slope, forest cover and regulation (Kolmogorov-Smirnov distance <= 0.17 for all
+ten characteristics; `docs/SPLIT_SUMMARY.md`, map in `docs/basin_map.png`). Every region contributes
+held-out basins. One gap: the held-out set has fewer strongly snow-dominated basins (90th percentile snow
+fraction 0.26 vs. 0.51), so transfer to snowmelt regimes is tested less than other regimes.
+
+**Inputs at prediction time.** Weather up to day t, static attributes, and the basin's observed flow up to
+day t (`streamflow_obs`). Held-out basins have no training rows but their past flow is available at
+inference (gauged but never trained on, BASINSHIFT 7.4); a variant without any flow input covers the
+ungauged case.
+
+Features: TBD (Lane B, `src/bs_features.py`; the current model builds its own, see section 5).
 
 ## 4. Preprocessing and leakage controls
-- Basins split first (60 held out entirely, stratified by region), then time (test from 2008-10-01).
-- Targets in train never reach into the test period; thresholds and climate indices from 1981-2008 only.
-- HydroATLAS attributes derived from modelled discharge/runoff removed.
-- Missing streamflow never filled; negatives set missing.
-- 15 automated checks in `scripts/caravan/check_leakage.py`, all passing (`LEAKAGE_REPORT.md`).
-- Labels are loaded only after predictions are written and validated.
+| Risk (7.2) | Control | Evidence |
+|---|---|---|
+| Basin identity leakage | Basins assigned to train / held out before any window or feature is built | check: held-out basins never in train (0 overlap) |
+| Temporal leakage | Test origins start 2008-10-01; training targets (t+h) never pass 2008-09-30 | check: latest training target date 2008-09-30 |
+| Validation leakage | Temporal validation drops fit rows whose t+h falls after the fit end | `basinshift_run.py --validate` |
+| Future information in inputs | `streamflow_obs` is same-day flow; features use dates <= t only | check: obs equals the previous origin's h=1 label on 1,236,888 consecutive pairs |
+| Target-derived statistics | Thresholds and climate indices from 1981-2008 only; validation thresholds from the fit period only | checks: recomputation matches to 1e-5 |
+| Modelled-discharge attributes | HydroATLAS `dis_*`, `run_mm_syr`, `riv_tc_usu`, `ria_ha_usu` removed | check: none present |
+| Label access | `test_labels.parquet` not shipped to modelling lanes; loaded only after predictions are written and validated | package contents, `basinshift_run.py` |
+| Missing data | Missing flow never filled or scored; negatives set missing | `PREP_REPORT.md` |
+
+All 15 checks are automated in `scripts/caravan/check_leakage.py` and pass (`LEAKAGE_REPORT.md`).
 
 ## 5. Model architecture and training procedure
 TBD (Lane C). Reference baseline: calibrated persistence (`src/baselines.py`).
