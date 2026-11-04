@@ -113,7 +113,7 @@ def generate_starter_dataset(
         all_dates = pd.date_range(start_train, end_test, freq="D")
         n = len(all_dates)
 
-        doy = all_dates.dayofyear.values
+        doy = all_dates.day_of_year.values if hasattr(all_dates, "day_of_year") else all_dates.dayofyear.values
         # Seasonal temperature cycle based on latitude/elevation
         base_temp = 16.0 - (info["lat"] - 30.0) * 0.8 - (info["mean_elevation_ft"] / 1000.0) * 2.0
         t_max = base_temp + 12.0 * np.sin(2 * np.pi * (doy - 105) / 365.25) + rng.normal(0, 3.5, n)
