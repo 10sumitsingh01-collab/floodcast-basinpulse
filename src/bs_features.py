@@ -275,8 +275,10 @@ def _build_basin_features(basin_df: pd.DataFrame, basin_static: pd.Series) -> pd
         val = float(basin_static.get(col, np.nan))
         out[col] = np.float32(val)
 
-    # Reindex back to original basin dates and align with original index
-    res = out.reindex(indexed.index)
+    # Reindex back to each original row's own date (rows may arrive in any order), then restore its index.
+    # (Fix: reindexing by the date-sorted index and then assigning basin_df.index by position put features
+    #  on the wrong rows whenever inputs were not already sorted by date.)
+    res = out.reindex(pd.DatetimeIndex(basin_df["date"].to_numpy()))
     res.index = basin_df.index
     return res
 

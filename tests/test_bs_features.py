@@ -169,3 +169,26 @@ class TestBasinshiftFeatures(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+def test_unsorted_input_rows_get_their_own_features():
+    """Regression test: rows given in any order must receive the features of their own (basin, date)."""
+    from pathlib import Path
+    import numpy as np
+    import pandas as pd
+    import pytest
+    from src.bs_features import FEATURE_COLS, INPUT_COLS, build_features
+    data = Path(__file__).resolve().parents[1] / "data" / "caravan"
+    if not (data / "train.parquet").exists():
+        pytest.skip("data/caravan not present")
+    tr = pd.read_parquet(data / "train.parquet", columns=INPUT_COLS)
+    st = pd.read_parquet(data / "static.parquet")
+    s = tr[tr["gauge_id"].isin(sorted(tr["gauge_id"].unique())[:3])].sort_values(["gauge_id", "date"])
+    s = s.reset_index(drop=True)
+    ref = build_features(s, st).set_index(["gauge_id", "date"])
+    sh = s.sample(frac=1.0, random_state=3).reset_index(drop=True)
+    got = build_features(sh, st)
+    exp = ref.loc[list(zip(sh["gauge_id"], sh["date"]))]
+    assert np.allclose(got["flow_obs"].to_numpy(float), sh["streamflow_obs"].to_numpy(float), equal_nan=True)
+    assert np.allclose(got[FEATURE_COLS].to_numpy(float), exp[FEATURE_COLS].to_numpy(float), equal_nan=True)
