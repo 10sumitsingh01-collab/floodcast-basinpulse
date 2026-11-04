@@ -1,10 +1,10 @@
-pandas
-numpy
-scikit-learn
-lightgbm
-xgboost
-optuna
-pyarrow
-pytest
-scipy
-matplotlib
+# Exact versions used for every reported BASINSHIFT result (Python 3.13.14)
+numpy==2.5.4
+pandas==3.1.0
+pyarrow==26.0.1
+scipy==1.18.1
+scikit-learn==1.9.1
+lightgbm==4.7.0
+matplotlib==3.11.2
+pytest==9.2.0
+psutil==7.1.0

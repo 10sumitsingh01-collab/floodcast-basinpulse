@@ -25,6 +25,7 @@ MIN_OBS_PER_BASIN = 30          # NSE/KGE need a minimum record to be meaningful
 INTERVAL_QUANTILES = (0.1, 0.9)  # nominal 80% interval
 BASE_RATE = {"high": 0.05, "extreme": 0.01}  # by construction of the 95th/99th percentile thresholds
 N_BINS_AP = 1000                # binned AUPRC for fast bootstrap
+ALERT_BUDGETS = (10, 20)        # alert-days per basin-year for "precision at fixed alert budget" (10.1)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -103,6 +104,13 @@ def basin_stats(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
         alert = pr >= 0.5
         s[f"tp_{ev}"] = (alert & e).astype(float)
         s[f"fp_{ev}"] = (alert & ~e).astype(float)
+        # fixed alert budget (10.1): each basin may raise B alert-days per year, on its highest probabilities
+        rank = pd.Series(pr).groupby(df[ID].to_numpy()).rank(ascending=False, method="first").to_numpy()
+        n_basin = pd.Series(1, index=df.index).groupby(df[ID].to_numpy()).transform("size").to_numpy()
+        for B in ALERT_BUDGETS:
+            k = np.maximum(1, np.round(B * n_basin / 365.25))
+            s[f"tpb{B}_{ev}"] = ((rank <= k) & e).astype(float)
+            s[f"nb{B}_{ev}"] = (rank <= k).astype(float)
         # histogram of scores per basin: bins x {neg, pos}
         b = np.minimum((pr * N_BINS_AP).astype(int), N_BINS_AP - 1)
         codes, uniq = pd.factorize(df[ID].to_numpy())
@@ -144,6 +152,10 @@ def _pooled(sums: pd.DataFrame, hists: dict[str, np.ndarray] | None) -> dict[str
         out[f"recall_{ev}"] = tp / ne if ne else np.nan
         out[f"precision_{ev}"] = tp / (tp + fp) if (tp + fp) else np.nan
         out[f"false_alarms_per_basin_year_{ev}"] = fp / basin_years if basin_years else np.nan
+        for B in ALERT_BUDGETS:
+            tpb, nb = t[f"tpb{B}_{ev}"], t[f"nb{B}_{ev}"]
+            out[f"recall_at_budget{B}_{ev}"] = tpb / ne if ne else np.nan
+            out[f"precision_at_budget{B}_{ev}"] = tpb / nb if nb else np.nan
         if hists is not None:
             out[f"auprc_{ev}"] = _binned_ap(hists[ev].sum(axis=0))
     return out

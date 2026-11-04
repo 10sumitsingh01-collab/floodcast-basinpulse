@@ -1,0 +1,9 @@
+# Only for the earlier FLOODCAST pipeline in legacy/ (not part of the BASINSHIFT entry)
+pandas
+numpy
+scikit-learn
+lightgbm
+xgboost
+optuna
+pyarrow
+pytest

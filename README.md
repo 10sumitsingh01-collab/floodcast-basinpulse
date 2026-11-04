@@ -106,43 +106,52 @@ Test labels are read only after predictions are written and validated, and only 
 
 ### 5. Tests
 ```bash
-pytest tests/test_basinshift_eval.py tests/test_bs_models.py
+pytest
 ```
-Run on a slice of the real data: metric identities, submission rule rejections, stress scenarios, and checks that
-no feature or prediction uses data from after its forecast date.
+Runs on a slice of the real data: metric identities, submission-rule rejections, the JSON Schema, stress
+scenarios, and checks that no feature or prediction uses data from after its forecast date.
+
+### 6. Docker (optional, isolated environment)
+```bash
+docker build -t basinpulse .
+docker run --rm -v "$PWD/data:/app/data" -v "$PWD/outputs:/app/outputs" basinpulse
+```
+
+### 7. Demo
+Open `docs/demo/index.html` in any browser (offline, single file): a map of the 60 unseen rivers; click one to see
+its forecasts, range and flood probability around its largest flood, against persistence.
 
 ## Repository layout
 ```
 basinshift_run.py            one command: data → model → submission → validation → scores → stress → report
 src/
-  bs_models.py               features + LightGBM model; final = RobustMeanModel; ablation variants
-  baselines.py               calibrated persistence reference
-  evaluate.py                BASINSHIFT section 10 metrics, basin-bootstrap CIs, reliability tables
-  submission.py              section 8.3 JSON writer, 8.4 validator
-  stress.py                  5 input-corruption scenarios (7.5)
+  bs_features.py             feature engineering (Lane B): 76 leakage-safe features
+  bs_models.py               LightGBM model (Lane C); final model class; ablation variants
+  baselines.py               persistence and seasonal-climatology references
+  evaluate.py                BASINSHIFT section 10 metrics, alert budgets, basin-bootstrap CIs, reliability
+  submission.py              section 8.3 JSON Lines writer, 8.4 validator
+  stress.py                  input-corruption scenarios (7.5)
 scripts/
-  caravan/                   fetch, prepare, leakage audit, split summary (data)
+  caravan/                   fetch, prepare, leakage audit, split summary, extra training basins, transfer package
   summarize_validation.py    docs/EXPERIMENTS.md from all validation runs
-  failure_analysis.py        docs/FAILURE_ANALYSIS.md: which basins are hard
-  make_figures.py            docs/figures/
+  failure_analysis.py        per-basin skill vs catchment characteristics
+  warning_and_regions.py     early-warning lead time, skill by region
+  feature_importance.py      which input groups matter for unseen basins
+  transfer_test.py           zero-shot test on Central European basins
+  make_figures.py, build_demo.py   figures and the demo page
 docs/
   TECHNICAL_REPORT.md        report following BASINSHIFT 12.1, with defense answers
-  MODEL_CARD.md              intended use, results, limitations
-  EXPERIMENTS.md             every validation experiment and the decision it led to
-  FAILURE_ANALYSIS.md        per-basin skill vs catchment characteristics
+  MODEL_CARD.md, TEAM_DECLARATION.md, DATA_PROVENANCE.md, DATA_README.md
+  EXPERIMENTS.md, FAILURE_ANALYSIS.md, WARNING_AND_REGIONS.md, FEATURE_IMPORTANCE.md, TRANSFER_EUROPE.md
   PRESENTATION.md            slide outline, talking points, defense one-liners
-  figures/                   hydrographs, skill by horizon, reliability, stress
-  DATA_README.md             columns, units, rules
-  DATA_PROVENANCE.md         sources, licenses, citations, transformations
-  SPLIT_SUMMARY.md, basin_map.png   are the held-out basins representative?
-  BASINSHIFT_EVALUATION.md   metrics, model interface, stress scenarios
-tests/                       test_basinshift_eval.py, test_bs_models.py (+ legacy FLOODCAST tests)
-data/caravan/                the data package (gitignored)
-outputs/                     run outputs (gitignored)
+  submission.schema.json     machine-readable output contract (8.3)
+  figures/, demo/, results/  figures, offline demo, metric tables of every reported run
+tests/                       evaluation, model, schema tests (real data)
+legacy/                      earlier FLOODCAST pipeline, not part of this entry (see legacy/README.md)
+Dockerfile                   reproducible environment; requirements.txt pins every version
+data/, outputs/              data packages and run outputs (gitignored)
 experiments/                 run logs with commit hashes
 ```
-The earlier FLOODCAST pipeline (`solution.py`, `src/config.py`, `src/data.py`, `src/features.py`,
-`src/models.py`, `src/validate.py`) is kept unchanged for reference. It is not part of the BASINSHIFT entry.
 
 ## Citations
 Kratzert et al. (2023) Caravan, *Scientific Data* 10, 61 · Newman et al. (2015) CAMELS, *HESS* 19, 209–223 ·

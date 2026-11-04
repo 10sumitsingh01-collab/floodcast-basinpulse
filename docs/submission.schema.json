@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "basinpulse/submission.schema.json",
+  "title": "BASINSHIFT forecast record (BASINSHIFT 8.3)",
+  "description": "One JSON object per line (JSON Lines, gzip) for each (catchment, forecast origin). Arrays are aligned with forecast_horizons_days. Additional checks that a JSON Schema cannot express (unknown ids, duplicates, missing keys, lower <= upper, extreme <= high probability) are enforced by src/submission.py validate().",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["catchment_id", "forecast_origin", "forecast_horizons_days", "predicted_discharge",
+               "high_flow_probability", "extreme_flow_probability", "prediction_intervals", "units"],
+  "properties": {
+    "catchment_id": {"type": "string", "pattern": "^camels_[0-9]{8}$",
+                     "description": "Caravan gauge id; always a string"},
+    "forecast_origin": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T00:00:00Z$",
+                        "description": "End of day t (UTC convention); inputs use data up to and including day t"},
+    "forecast_horizons_days": {"type": "array", "const": [1, 3, 7]},
+    "predicted_discharge": {"$ref": "#/$defs/nonneg3", "description": "Point forecast of flow on day t+h, mm/day"},
+    "high_flow_probability": {"$ref": "#/$defs/prob3",
+                              "description": "P(flow on day t+h > basin's 95th percentile flow, 1981-10..2008-09)"},
+    "extreme_flow_probability": {"$ref": "#/$defs/prob3",
+                                 "description": "P(flow on day t+h > basin's 99th percentile flow); <= high_flow_probability"},
+    "prediction_intervals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lower", "upper", "nominal_coverage"],
+      "properties": {
+        "lower": {"$ref": "#/$defs/nonneg3", "description": "10th percentile, mm/day"},
+        "upper": {"$ref": "#/$defs/nonneg3", "description": "90th percentile, mm/day"},
+        "nominal_coverage": {"type": "number", "const": 0.8}
+      }
+    },
+    "units": {"type": "string", "const": "mm/day"}
+  },
+  "$defs": {
+    "nonneg3": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number", "minimum": 0}},
+    "prob3": {"type": "array", "minItems": 3, "maxItems": 3,
+              "items": {"type": "number", "minimum": 0, "maximum": 1}}
+  }
+}
