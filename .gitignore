@@ -17,3 +17,4 @@ data/caravan_extra/
 outputs/**/model.joblib
 data/final_*/
 models/*.joblib
+!models/basinpulse_final.joblib

@@ -1,0 +1,20 @@
+{
+  "model": "src.tuning:T0",
+  "settings": {},
+  "trained_utc": "2026-11-05T02:15:02+00:00",
+  "commit": "d75af6c-dirty",
+  "training_packages": [
+    "data\\final_camels"
+  ],
+  "n_basins": 671,
+  "n_rows": 8087563,
+  "period": [
+    "1981-10-01",
+    "2014-09-30"
+  ],
+  "fit_seconds": 1516.6,
+  "peak_memory_mb": 1663.3,
+  "model_mb": 22.4,
+  "model_sha256": "bafae325ed79c59d935be4dc216956c9763df3cc2b4d5c6d63440a7456f1bd34",
+  "python": "3.13.14"
+}

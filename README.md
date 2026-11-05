@@ -60,13 +60,38 @@ Same picture on the other test sets (`temporal`: NSE 0.68 / 0.26 / 0.15; `geo`: 
 Full tables: `outputs/lgbm_final/REPORT.md`; figures in `docs/figures/`; failure analysis in
 [docs/FAILURE_ANALYSIS.md](docs/FAILURE_ANALYSIS.md).
 
+**Zero-shot on another continent.** Trained on US basins only and applied without retraining to **579 Central
+European basins** (LaMAH-CE: Austria, Germany, Switzerland), 2008–2014: NSE **0.74 / 0.36** at 1 / 3 days
+(persistence 0.68 / 0.26, climatology 0.06 / 0.05), high-flow AUPRC 0.79 vs 0.64, extreme-flow AUPRC 0.39 vs 0.17.
+[docs/TRANSFER_EUROPE.md](docs/TRANSFER_EUROPE.md)
+
 **What we learned** (validation, [details](docs/EXPERIMENTS.md)):
 - Predicting the *change* from the river's own current flow transfers well: unseen-basin skill is close to
-  seen-basin skill.
-- **H1:** catchment attributes add small, consistent gains (within confidence intervals).
+  seen-basin skill, and holds on another continent.
+- **More rivers + more capacity** helps unseen basins most: adding 149 training basins and doubling the sample
+  raised every unseen-basin metric (extreme-flow AUPRC at 7 days +28%).
+- **H1:** catchment attributes barely move the median forecast but matter for **flood detection at 3–7 days**
+  (shuffling them costs 0.12 high-flow AUPRC; [feature importance](docs/FEATURE_IMPORTANCE.md)).
 - **H4:** training with 15% of inputs hidden makes the model much more robust to missing data
   (1-day NSE with 30% of inputs missing: 0.52 → 0.59) at almost no clean cost.
+- **Late data:** with a data-age input and delay training, the 1-day range stays calibrated when the latest flow
+  reading is a day late (coverage 0.57 → 0.81).
 - **Ungauged basins:** with no flow data at all, the model still beats persistence at 3 and 7 days.
+
+**ShiftGuard** (built in, opt-in): every basin gets a **novelty score** (how unlike the training basins its
+catchment is); ranges can be calibrated per novelty level; and every forecast comes with its **drivers**
+("recent rain", "snowmelt", "soil wetness", ...) from exact tree contributions. `predict.py --explain` writes both.
+
+## Run on new (hidden) data
+```bash
+python predict.py --inputs hidden_test.parquet --out submission.jsonl.gz
+python predict.py --inputs test.csv --history history.csv --static static.csv --thresholds thresholds.csv \
+                  --explain drivers.parquet --out submission.jsonl.gz
+```
+Loads `models/basinpulse_final.joblib` (trained on all 671 CAMELS-US basins, 1981–2014, by `train_final.py`).
+Accepts parquet or CSV, common column names (`gauge_id`/`catchment_id`/`station_id`, `date`/`forecast_origin`),
+missing weather columns and missing history / attribute / threshold files; the output is validated against the
+BASINSHIFT 8.4 rules before it is written.
 
 ## How to run
 
