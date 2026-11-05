@@ -193,3 +193,9 @@ body.on-panels .meta { visibility: hidden; }   /* film chapter captions belong t
   .driver { grid-template-columns: 120px 1fr 40px; }
   .try-empty { min-height: 200px; padding: 20px; }
 }
+
+/* ---- data source notes under charts ------------------------------------------------------------------ */
+.src-note { margin: 10px 0 0; font-size: 12px; line-height: 1.55; color: var(--mute); max-width: 95ch;
+  border-left: 2px solid var(--ice); padding-left: 10px; }
+.src-note b { color: var(--paper); font-weight: 600; }
+.src-note a { color: var(--ice); }

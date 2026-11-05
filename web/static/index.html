@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..900&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=4">
+<link rel="stylesheet" href="/static/app.css?v=5">
 </head>
 <body>
 
@@ -90,6 +90,7 @@
         <span><i class="ln obs"></i>observed</span><span><i class="ln fc"></i>BasinPulse</span><span><i class="sw band"></i>10–90% range</span>
         <span><i class="ln per"></i>persistence</span><span><i class="ln ph"></i>P(high flow)</span><span><i class="ln thr"></i>high-flow line</span>
       </div>
+      <p class="src-note" id="rSrc"></p>
     </div>
   </div>
 </section>
@@ -123,8 +124,8 @@
         <span class="mega-3">DROP A CSV</span>
         <span class="mono">or click to choose · gauge_id, date, streamflow_obs, weather columns</span>
       </label>
-      <button class="sample-btn mono" id="useSample" type="button">▶ Run the real sample</button>
-      <p class="mono small">Two rivers the model never saw, 2013 ·
+      <button class="sample-btn mono" id="useSample" type="button">▶ Run on real USGS river data</button>
+      <p class="mono small">Sample: the real Caravan / CAMELS-US record of two USGS rivers the model never saw, 2013 ·
         <a href="/api/sample" id="sampleLink" download>download the sample CSV</a> to see the expected columns.</p>
       <p class="mono small status" id="tryStatus" role="status"></p>
     </div>
@@ -150,6 +151,7 @@
           <span><i class="sw band"></i>10–90% range</span><span><i class="ln ph"></i>P(high flow), right axis</span>
           <span><i class="ln thr"></i>high-flow line (95th percentile)</span>
         </div>
+        <p class="src-note" id="trySrcNote"></p>
       </div>
     </div>
   </div>
@@ -176,6 +178,6 @@
   </footer>
 </section>
 
-<script src="/static/app.js?v=4"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>
