@@ -1,6 +1,7 @@
 """BasinPulse website + API.
 
     python web/server.py            # http://localhost:8000
+    HOST=0.0.0.0 PORT=7860 python web/server.py      # public hosting (Hugging Face Space, see deploy/)
 
 GET  /                      the site (web/static/index.html)
 GET  /api/summary           headline results (from logged runs, built by web/build_data.py)
@@ -15,7 +16,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -35,16 +38,21 @@ from src import submission  # noqa: E402
 STATIC = ROOT / "web" / "static"
 DATA = STATIC / "data"
 MODEL_PATH = ROOT / "models" / "basinpulse_final.joblib"
-MAX_ROWS = 60_000          # keep live forecasts fast on a laptop (about 40 basin-years)
+# Limits for live forecasts; a small public host sets lower values through the environment (see render.yaml).
+MAX_ROWS = int(os.environ.get("MAX_ROWS", "60000"))       # 60k = about 40 basin-years, fast on a laptop
+MAX_BYTES = int(os.environ.get("MAX_BYTES", "15000000"))  # largest accepted upload
+BUSY = threading.BoundedSemaphore(int(os.environ.get("MAX_LIVE", "2")))  # live forecasts running at once
 app = FastAPI(title="BasinPulse", docs_url="/api/docs")
 _model = None
+_model_lock = threading.Lock()
 
 
 def model():
     global _model
-    if _model is None:
-        import joblib
-        _model = joblib.load(MODEL_PATH)
+    with _model_lock:   # the startup warm-up and a first request never load it twice
+        if _model is None:
+            import joblib
+            _model = joblib.load(MODEL_PATH)
     return _model
 
 
@@ -87,12 +95,29 @@ def sample():
                     headers={"Content-Disposition": "attachment; filename=basinpulse_sample_inputs.csv"})
 
 
+@app.on_event("startup")
+def _warm() -> None:   # load the model in the background so the first live forecast is quick
+    threading.Thread(target=model, daemon=True).start()
+
+
 @app.post("/api/forecast")
-async def forecast(file: UploadFile = File(...)):
-    t0 = time.time()
-    raw = await file.read()
+def forecast(file: UploadFile = File(...)):   # plain def: runs in a worker thread, never blocks the site
+    if not BUSY.acquire(timeout=30):
+        raise HTTPException(503, "The model is busy with other forecasts; please try again in a minute")
     try:
-        df = pd.read_parquet(io.BytesIO(raw)) if file.filename.endswith(".parquet") else pd.read_csv(
+        return _forecast(file)
+    finally:
+        BUSY.release()
+
+
+def _forecast(file: UploadFile):
+    t0 = time.time()
+    raw = file.file.read(MAX_BYTES + 1)
+    if len(raw) > MAX_BYTES:
+        raise HTTPException(413, f"File too large: please upload at most {MAX_BYTES // 1_000_000} MB")
+    name = file.filename or ""
+    try:
+        df = pd.read_parquet(io.BytesIO(raw)) if name.endswith(".parquet") else pd.read_csv(
             io.BytesIO(raw), dtype={"gauge_id": str, "catchment_id": str, "station_id": str})
     except Exception as e:
         raise HTTPException(400, f"Could not read the file: {e}")
@@ -143,4 +168,4 @@ def index():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8000")))
