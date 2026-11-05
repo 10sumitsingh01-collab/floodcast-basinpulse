@@ -129,7 +129,7 @@ def _forecast(file: UploadFile):
         raise HTTPException(413, f"{len(test):,} rows: please upload at most {MAX_ROWS:,} rows for a live forecast")
     keys = test[[P.ID, P.DATE]].drop_duplicates().reset_index(drop=True)
     rows = P.continuous(test[[P.ID, P.DATE, P.OBS] + P.WEATHER])
-    static = P.derive_static(rows, None)
+    static = P.derive_static(rows, None)   # fills real attributes of known gauges (models/catchment_attributes)
     thr = P.derive_thresholds(rows, None)
     m = model()
     preds = m.predict(m, rows, rows.iloc[:0], static, thr)
@@ -155,6 +155,7 @@ def _forecast(file: UploadFile):
                 "observed": [None if pd.isna(v) else round(float(v), 3) for v in obs.reindex(days.to_numpy())]}
         out.append(series)
     return {"basins": out, "n_origins": len(keys), "valid_submission": errors == [], "problems": errors,
+            "attributes_found": int(static.attrs.get("matched", 0)),
             "seconds": round(time.time() - t0, 1)}
 
 

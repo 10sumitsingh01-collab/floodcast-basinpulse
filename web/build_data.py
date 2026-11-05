@@ -144,11 +144,30 @@ def main() -> None:
         (OUT / "river" / f"{gid}.json").write_text(json.dumps(detail), encoding="utf-8")
         print(f"{gid} done", flush=True)
     (OUT / "rivers.json").write_text(json.dumps(out), encoding="utf-8")
-    # sample upload for "try the model": two unseen rivers, model inputs only (no targets), 2012-10 to 2013-12
-    ss = sorted(out, key=lambda x: -(x["nse"]["3"] or -9))[:2]
-    sample = test[test[ID].isin([x["id"] for x in ss]) & (test[DATE] >= "2012-10-01") & (test[DATE] <= "2013-12-31")]
-    sample.to_csv(OUT / "sample_inputs.csv", index=False)
+    make_sample()
     print(f"wrote {OUT}: summary, {len(out)} rivers")
+
+
+def make_sample(caravan: Path = Path.home() / "BasinPulse-data" / "caravan") -> None:
+    """Sample upload for "try the model": rivers the SUBMITTED model never saw. It was trained on US rivers only
+    (all 671 CAMELS-US, 1981-2014), so the sample comes from Central Europe (LaMAH-CE): the two rivers with the most
+    severe June 2013 flood relative to their extreme-flow line (chosen by flood severity, not by forecast skill).
+    Model inputs only (no targets), 2012-10 to 2013-12."""
+    import sys
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from blind_test import pick_rivers
+    lamah = ROOT / "data" / "transfer_lamah"
+    test = pd.read_parquet(lamah / "test.parquet")
+    ids = pick_rivers(test, pd.read_csv(lamah / "thresholds.csv", dtype={ID: str}), n=2)
+    sample = test[test[ID].isin(ids) & (test[DATE] >= "2012-10-01") & (test[DATE] <= "2013-12-31")]
+    sample.to_csv(OUT / "sample_inputs.csv", index=False, date_format="%Y-%m-%d")
+    names = pd.read_csv(caravan / "attributes" / "lamah" / "attributes_other_lamah.csv", dtype={ID: str}).set_index(ID)
+    meta = {"rivers": [{"id": g, "name": names.loc[g, "gauge_name"], "country": names.loc[g, "country"]} for g in ids],
+            "period": "Oct 2012 - Dec 2013", "event": "June 2013 Central European flood",
+            "source": "LaMAH-CE (Klingler et al. 2021, CC-BY-SA 4.0) via Caravan",
+            "unseen_because": "the submitted model was trained on US rivers only"}
+    (OUT / "sample_meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    print(f"sample: {', '.join(r['name'] for r in meta['rivers'])} ({len(sample)} rows)")
 
 
 if __name__ == "__main__":

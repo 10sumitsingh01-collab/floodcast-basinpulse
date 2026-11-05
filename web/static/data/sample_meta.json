@@ -1,0 +1,18 @@
+{
+ "rivers": [
+  {
+   "id": "lamah_204636",
+   "name": "Schwemmbach at Friedburg",
+   "country": "Austria"
+  },
+  {
+   "id": "lamah_205948",
+   "name": "Feldaist at Freistadt (Hafnerzeile)",
+   "country": "Austria"
+  }
+ ],
+ "period": "Oct 2012 - Dec 2013",
+ "event": "June 2013 Central European flood",
+ "source": "LaMAH-CE (Klingler et al. 2021, CC-BY-SA 4.0) via Caravan",
+ "unseen_because": "the submitted model was trained on US rivers only"
+}

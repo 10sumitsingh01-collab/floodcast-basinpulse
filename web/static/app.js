@@ -199,8 +199,13 @@ function hover(svg, tip, g, row) {
   svg.ontouchend = hide;
 }
 // official USGS page of a CAMELS gauge (camels_09210500 -> 09210500), so anyone can check the measured flow
-const usgs = (id) => { const g = String(id).replace(/^camels_/, "");
-  return /^\d{8}$/.test(g) ? `<a href="https://waterdata.usgs.gov/monitoring-location/USGS-${g}/" target="_blank" rel="noopener">USGS gauge ${g}</a>` : esc(id); };
+let SAMPLE = null;   // web/static/data/sample_meta.json: names and source of the sample rivers
+const usgs = (id) => { const s = String(id), g = s.replace(/^camels_/, "");
+  if (s.startsWith("camels_") && /^\d{8}$/.test(g))
+    return `<a href="https://waterdata.usgs.gov/monitoring-location/USGS-${g}/" target="_blank" rel="noopener">USGS gauge ${g}</a>`;
+  const r = SAMPLE && SAMPLE.rivers.find((x) => x.id === s);
+  return r ? `${esc(r.name)} (${esc(r.country)}, gauge ${esc(s.replace(/^[a-z]+_/, ""))})` : esc(s); };
+const riverName = (id) => { const r = SAMPLE && SAMPLE.rivers.find((x) => x.id === id); return r ? r.name : id.replace(/^[a-z]+_/, "river "); };
 const pct = (v) => (v == null ? "–" : Math.round(v * 100) + "%");
 const H_LABEL = (h) => `forecast made ${h} day${h > 1 ? "s" : ""} before`;
 function readout(date, h, i, obs) {
@@ -250,15 +255,17 @@ async function runForecast(file, label) {
     if (!r.ok) throw new Error(j.detail || r.statusText);
     if (!j.basins || !j.basins.length) throw new Error("no rivers with usable rows in this file");
     TRY = { ...j, label }; TRY_I = 0;
-    st.textContent = `${j.n_origins.toLocaleString()} forecast days · ${j.basins.length} river${j.basins.length > 1 ? "s" : ""} · ${j.seconds} s on the server · output ${j.valid_submission ? "passes" : "fails"} the BASINSHIFT format checks`;
+    st.textContent = `${j.n_origins.toLocaleString()} forecast days · ${j.basins.length} river${j.basins.length > 1 ? "s" : ""} · ${j.seconds} s on the server · `
+      + `catchment attributes found for ${j.attributes_found ?? 0} of ${j.basins.length} · output ${j.valid_submission ? "passes" : "fails"} the BASINSHIFT format checks`;
     $("#trySrc").innerHTML = `Live forecast of <b>${esc(label)}</b>`;
-    $("#trySrcNote").innerHTML = (label.startsWith("the real sample")
-      ? `<b>Real data, forecast live just now.</b> Inputs: the measured record of ${j.basins.map((x) => usgs(x.id)).join(" and ")} `
-        + `(Caravan v1.6 / CAMELS-US: observed flow and ERA5-Land weather, Oct 2012 – Dec 2013). `
+    $("#trySrcNote").innerHTML = (label.startsWith("the real sample") && SAMPLE
+      ? `<b>Real data, forecast live just now, on rivers the model never saw.</b> Inputs: the measured record of `
+        + `${j.basins.map((x) => usgs(x.id)).join(" and ")} (${esc(SAMPLE.source)}: observed flow and ERA5-Land weather, `
+        + `${esc(SAMPLE.period)}), through the ${esc(SAMPLE.event)}; ${esc(SAMPLE.unseen_because)}. `
       : `<b>Forecast live just now from your file.</b> `)
       + `The white line is the observed flow from the file; the blue line and range are what the submitted model predicted, each using only data from before the forecast was made (1, 3 or 7 days ahead).`;
     $("#tryEmpty").hidden = true; $("#tryResult").hidden = false;
-    tabs($("#tryRivers"), (i) => { TRY_I = i; drawTry(); }, 0, j.basins.map((x) => x.id.replace("camels_", "river ")));
+    tabs($("#tryRivers"), (i) => { TRY_I = i; drawTry(); }, 0, j.basins.map((x) => riverName(x.id)));
     drawTry();
   } catch (e) {
     st.classList.add("err"); st.textContent = `Could not forecast: ${e.message}`;
@@ -278,12 +285,14 @@ $("#file").onchange = (e) => { const f = e.target.files[0]; if (f) runForecast(f
 drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) runForecast(f, `your file “${f.name}”`); });
 $("#useSample").onclick = async () => {
   try { const r = await fetch("/api/sample"); if (!r.ok) throw new Error(r.statusText);
-    runForecast(new File([await r.blob()], "sample.csv", { type: "text/csv" }), "the real sample (2 USGS rivers the model never saw, 2013)");
+    runForecast(new File([await r.blob()], "sample.csv", { type: "text/csv" }),
+      "the real sample (2 Austrian rivers through the June 2013 flood, never seen in training)");
   } catch (e) { $("#tryStatus").classList.add("err"); $("#tryStatus").textContent = `Could not load the sample: ${e.message}`; } };
 tabs($("#tryTabs"), (h) => { TRY_H = h; drawTry(); }, 1);
 
 /* ---------------- boot ------------------------------------------------------------------------------------------- */
 sizeCanvas(); loadFrames(); kick();
+api("/static/data/sample_meta.json").then((m) => { SAMPLE = m; }).catch(() => {});
 api("/api/summary").then((s) => { S = s; renderResults(); lastStatement = null; chapter = -1; kick();
   const m = s.model.geo_temporal;
   $("#sgFacts").innerHTML = `<li>Ranges hold <b>${Math.round(100 * m.interval_coverage["3"].value)}%</b> of real values (target 80%)</li>

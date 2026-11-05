@@ -132,8 +132,9 @@
         <span class="mega-3">DROP A CSV</span>
         <span class="mono">or click to choose · gauge_id, date, streamflow_obs, weather columns</span>
       </label>
-      <button class="sample-btn mono" id="useSample" type="button">▶ Run on real USGS river data</button>
-      <p class="mono small">Sample: the real Caravan / CAMELS-US record of two USGS rivers the model never saw, 2013 ·
+      <button class="sample-btn mono" id="useSample" type="button">▶ Run the June 2013 flood sample</button>
+      <p class="mono small" id="sampleInfo">Sample: the real measured record of two Austrian rivers through the June 2013
+        flood. The submitted model never saw them: it was trained on US rivers only ·
         <a href="/api/sample" id="sampleLink" download>download the sample CSV</a> to see the expected columns.</p>
       <p class="mono small status" id="tryStatus" role="status"></p>
     </div>
@@ -141,7 +142,8 @@
       <p class="mono try-src" id="trySrc">No forecast yet.</p>
       <div class="try-empty" id="tryEmpty">
         <p>Your forecast appears here.</p>
-        <p class="mono small">Upload a CSV on the left, or run the real sample: two rivers the model never saw, 2013.
+        <p class="mono small">Upload a CSV on the left, or run the real sample: two Austrian rivers through the June 2013 flood,
+          never seen in training.
           The model then forecasts every day 1, 3 and 7 days ahead, with its 10–90% range and the probability of high flow,
           and we plot it against what the river really did.</p>
       </div>
@@ -186,6 +188,6 @@
   </footer>
 </section>
 
-<script src="/static/app.js?v=6"></script>
+<script src="/static/app.js?v=8"></script>
 </body>
 </html>
