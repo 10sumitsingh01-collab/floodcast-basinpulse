@@ -8,3 +8,6 @@ lightgbm==4.7.0
 matplotlib==3.11.2
 pytest==9.2.0
 psutil==7.1.0
+fastapi==0.115.6
+uvicorn==0.32.1
+python-multipart==0.0.20
