@@ -1,0 +1,19 @@
+# Public BasinPulse website (Hugging Face Docker Space). Built by deploy/make_space.py.
+#   docker build -t basinpulse-web deploy/space_build && docker run --rm -p 7860:7860 basinpulse-web
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONIOENCODING=utf-8 HOST=0.0.0.0 PORT=7860
+# LightGBM needs the OpenMP runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
+# Hugging Face runs Spaces as user 1000
+RUN useradd -m -u 1000 user
+WORKDIR /app
+COPY --chown=user requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY --chown=user . .
+USER user
+
+EXPOSE 7860
+HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/api/health')"
+CMD ["python", "web/server.py"]
