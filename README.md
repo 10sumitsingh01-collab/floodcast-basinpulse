@@ -2,6 +2,9 @@
 
 **Team:** BasinPulse | **Challenge:** BASINSHIFT, the Global Flood Intelligence Challenge
 
+**Live site:** https://basinpulse.onrender.com (results, the 60 unseen rivers, and the submitted model running live on
+your CSV; free hosting, so the first visit after a quiet spell takes about a minute to wake up)
+
 For every river basin and every day *t*, BasinPulse forecasts the river's flow **1, 3 and 7 days ahead**,
 gives a **10–90% range**, and estimates the **probability of high and extreme flow**. The headline test is on
 **60 basins the model never saw during training**, in years after the training period.
@@ -159,7 +162,7 @@ largest flood, ShiftGuard drivers, and a live "try the model" upload that runs t
 
 ### 8. Public website (Render, free)
 `render.yaml` deploys the site from this repository: on render.com, **New → Blueprint**, pick the repository, and
-Render builds `deploy/Dockerfile.web` and serves it at `https://basinpulse.onrender.com` (or the name it assigns),
+Render builds `deploy/Dockerfile.web` and serves it at https://basinpulse.onrender.com,
 redeploying on every push to `main`. The image holds only what the site needs (web/, predict.py, src/, the submitted
 model; no training or test data). On the free 512 MB plan live uploads are limited to 20,000 rows, one at a time
 (the server peaks below 300 MB). Free services sleep after 15 minutes idle and wake in about a minute.
