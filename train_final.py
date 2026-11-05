@@ -33,6 +33,7 @@ def main() -> int:
     ap.add_argument("--model", required=True, help="module:Class chosen on validation")
     ap.add_argument("--data", type=Path, nargs="+", required=True, help="training packages (train/static/thresholds)")
     ap.add_argument("--out", type=Path, default=ROOT / "models" / "basinpulse_final.joblib")
+    ap.add_argument("--kw", default="{}", help="extra settings as JSON, for example {\"shift_guard\": true}")
     a = ap.parse_args()
     t0 = time.time()
     tr, st, th = [], [], []
@@ -45,13 +46,13 @@ def main() -> int:
     thr = pd.concat(th, ignore_index=True)
     del tr
     mod, _, cls = a.model.partition(":")
-    model = getattr(importlib.import_module(mod), cls)()
+    model = getattr(importlib.import_module(mod), cls)(**json.loads(a.kw))
     print(f"training {a.model} on {train[ID].nunique()} basins, {len(train):,} rows", flush=True)
     model.fit(train, static, thr)
     a.out.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, a.out, compress=3)
     info = {
-        "model": a.model, "trained_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "model": a.model, "settings": json.loads(a.kw), "trained_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "commit": git_commit(), "training_packages": [str(d) for d in a.data],
         "n_basins": int(train[ID].nunique()), "n_rows": len(train),
         "period": [str(train["date"].min().date()), str(train["date"].max().date())],
