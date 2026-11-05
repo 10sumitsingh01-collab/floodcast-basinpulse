@@ -178,20 +178,33 @@ function lineChart(svg, d, opts) {
     + `<text x="${L}" y="${T - 2}" class="axis" fill="${css("--mute")}" font-size="10">flow, mm/day</text>`;
   return { X, n, L, R, W };
 }
-function drawChart() {
-  const d = DETAIL, h = d["h" + H];
-  const g = lineChart($("#chart"), { dates: d.dates, observed: d.observed, ...h }, { thr: d.q_high });
-  const svg = $("#chart"), tip = $("#tip"), cur = $("#chartCursor");
-  svg.onmousemove = (e) => {
-    const b = svg.getBoundingClientRect(), fx = ((e.clientX - b.left) / b.width) * g.W;
+// hover / touch read-out for a chart drawn by lineChart; row(i) gives the tooltip for point i
+function hover(svg, tip, g, row) {
+  const cur = svg.querySelector(`#${svg.id}Cursor`);
+  const show = (cx, cy) => {
+    const b = svg.getBoundingClientRect(), fx = ((cx - b.left) / b.width) * g.W;
     const i = Math.round(((fx - g.L) / (g.W - g.L - g.R)) * (g.n - 1)); if (i < 0 || i >= g.n) return;
     cur.setAttribute("x1", g.X(i)); cur.setAttribute("x2", g.X(i)); cur.setAttribute("visibility", "visible");
-    const dr = h.drivers[i];
-    tip.innerHTML = `${d.dates[i]} · ${H} day${H > 1 ? "s" : ""} ahead<br>observed <b style="color:var(--paper)">${fmt(d.observed[i])}</b> · forecast <b style="color:var(--ice)">${fmt(h.forecast[i])}</b><br>range ${fmt(h.lower[i])}–${fmt(h.upper[i])} · P(high) <b>${h.p_high[i] == null ? "–" : Math.round(h.p_high[i] * 100) + "%"}</b>`
-      + (dr ? `<br>why: ${dr.filter((x) => x[1] > 0).map((x) => `${x[0]} ${Math.round(x[1] * 100)}%`).join(" · ")}` : "");
-    tip.hidden = false; const px = e.clientX - b.left; tip.style.left = `${Math.min(px + 14, b.width - 220)}px`; tip.style.top = `${e.clientY - b.top + 14}px`;
+    tip.innerHTML = row(i); tip.hidden = false;
+    const px = cx - b.left; tip.style.left = `${Math.max(0, Math.min(px + 14, b.width - 220))}px`; tip.style.top = `${cy - b.top + 14}px`;
   };
-  svg.onmouseleave = () => { tip.hidden = true; cur.setAttribute("visibility", "hidden"); };
+  const hide = () => { tip.hidden = true; cur.setAttribute("visibility", "hidden"); };
+  svg.onmousemove = (e) => show(e.clientX, e.clientY);
+  svg.onmouseleave = hide;
+  svg.ontouchstart = svg.ontouchmove = (e) => { const t = e.touches[0]; if (t) show(t.clientX, t.clientY); };
+  svg.ontouchend = hide;
+}
+const pct = (v) => (v == null ? "–" : Math.round(v * 100) + "%");
+const H_LABEL = (h) => `forecast made ${h} day${h > 1 ? "s" : ""} before`;
+function readout(date, h, i, obs) {
+  return `${date} · ${H_LABEL(h.horizon)}<br>observed <b style="color:var(--paper)">${fmt(obs)}</b> · forecast <b style="color:var(--ice)">${fmt(h.forecast[i])}</b><br>range ${fmt(h.lower[i])}–${fmt(h.upper[i])} · P(high) <b>${pct(h.p_high[i])}</b>`;
+}
+function drawChart() {
+  const d = DETAIL, h = { ...d["h" + H], horizon: H };
+  const g = lineChart($("#chart"), { dates: d.dates, observed: d.observed, ...h }, { thr: d.q_high });
+  hover($("#chart"), $("#tip"), g, (i) => { const dr = h.drivers[i];
+    return readout(d.dates[i], h, i, d.observed[i])
+      + (dr ? `<br>why: ${dr.filter((x) => x[1] > 0).map((x) => `${x[0]} ${Math.round(x[1] * 100)}%`).join(" · ")}` : ""); });
 }
 function renderAlert() {
   const d = DETAIL, h = d.h1; let best = -1;
@@ -204,36 +217,57 @@ function renderAlert() {
     ${drv.map((x) => `<div class="driver"><span>${x[0]}</span><span class="bar"><i style="width:${Math.round(x[1] * 100)}%"></i></span><span class="pct">${Math.round(x[1] * 100)}%</span></div>`).join("")}
     <p class="mono small">Shares of the push towards “flood”, from the model’s own tree contributions.</p>`;
 }
-function tabs(el, onPick, active) {
-  el.innerHTML = [1, 3, 7].map((h) => `<button type="button" role="tab" data-h="${h}" class="${h === active ? "on" : ""}">${h} DAY${h > 1 ? "S" : ""} AHEAD</button>`).join("");
-  el.querySelectorAll("button").forEach((b) => (b.onclick = () => { el.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); onPick(+b.dataset.h); }));
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+// tab row; default: the three horizons. labels (optional) gives one tab per entry, valued by its index
+function tabs(el, onPick, active, labels) {
+  const items = labels ? labels.map((l, i) => [i, l]) : [1, 3, 7].map((h) => [h, `${h} DAY${h > 1 ? "S" : ""} AHEAD`]);
+  el.innerHTML = items.map(([v, l]) => `<button type="button" role="tab" aria-selected="${v === active}" data-v="${v}" class="${v === active ? "on" : ""}">${esc(l)}</button>`).join("");
+  el.querySelectorAll("button").forEach((b) => (b.onclick = () => {
+    el.querySelectorAll("button").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-selected", x === b); });
+    onPick(+b.dataset.v); }));
 }
 
 /* ---------------- try the model ------------------------------------------------------------------------------- */
-let TRY = null, TRY_H = 1, TRY_I = 0;
-async function runForecast(file) {
-  const st = $("#tryStatus"); st.classList.remove("err"); st.textContent = "Forecasting with the submitted model…";
+let TRY = null, TRY_H = 1, TRY_I = 0, busy = false;
+async function runForecast(file, label) {
+  if (busy) return; busy = true;
+  const st = $("#tryStatus"), btn = $("#useSample"), t0 = Date.now();
+  st.classList.remove("err"); btn.disabled = true; drop.classList.add("busy");
+  $("#trySrc").textContent = `Forecasting ${label}`;
+  const tick = () => { st.textContent = `Running the submitted model… ${Math.round((Date.now() - t0) / 1000)} s`; };
+  tick(); const timer = setInterval(tick, 500);
   const fd = new FormData(); fd.append("file", file);
   try {
-    const r = await fetch("/api/forecast", { method: "POST", body: fd }); const j = await r.json();
+    const r = await fetch("/api/forecast", { method: "POST", body: fd });
+    const j = await r.json().catch(() => ({ detail: r.statusText || "the server did not answer" }));
     if (!r.ok) throw new Error(j.detail || r.statusText);
-    TRY = j; TRY_I = 0;
-    st.textContent = `${j.n_origins.toLocaleString()} forecast days · ${j.basins.length} river${j.basins.length > 1 ? "s" : ""} · ${j.seconds} s · output ${j.valid_submission ? "passes" : "fails"} the BASINSHIFT format checks`;
+    if (!j.basins || !j.basins.length) throw new Error("no rivers with usable rows in this file");
+    TRY = { ...j, label }; TRY_I = 0;
+    st.textContent = `${j.n_origins.toLocaleString()} forecast days · ${j.basins.length} river${j.basins.length > 1 ? "s" : ""} · ${j.seconds} s on the server · output ${j.valid_submission ? "passes" : "fails"} the BASINSHIFT format checks`;
+    $("#trySrc").innerHTML = `Live forecast of <b>${esc(label)}</b>`;
+    $("#tryEmpty").hidden = true; $("#tryResult").hidden = false;
+    tabs($("#tryRivers"), (i) => { TRY_I = i; drawTry(); }, 0, j.basins.map((x) => x.id.replace("camels_", "river ")));
     drawTry();
-  } catch (e) { st.classList.add("err"); st.textContent = `Could not forecast: ${e.message}`; }
+  } catch (e) {
+    st.classList.add("err"); st.textContent = `Could not forecast: ${e.message}`;
+    if (TRY) $("#trySrc").innerHTML = `Live forecast of <b>${esc(TRY.label)}</b> (the new file could not be used)`;
+    else $("#trySrc").textContent = "No forecast yet.";
+  } finally { clearInterval(timer); busy = false; btn.disabled = false; drop.classList.remove("busy"); }
 }
 function drawTry() {
-  if (!TRY) return; const b = TRY.basins[TRY_I], h = b["h" + TRY_H];
-  lineChart($("#tryChart"), { ...h, observed: h.observed }, { thr: b.q_high });
-  $("#tryMeta").innerHTML = TRY.basins.length > 1 ? TRY.basins.map((x, i) => `<button class="linkish mono" data-i="${i}">${x.id}</button>`).join(" · ") : b.id;
-  $("#tryMeta").querySelectorAll("button").forEach((x) => (x.onclick = () => { TRY_I = +x.dataset.i; drawTry(); }));
+  if (!TRY) return; const b = TRY.basins[TRY_I], h = { ...b["h" + TRY_H], horizon: TRY_H };
+  const g = lineChart($("#tryChart"), h, { thr: b.q_high });
+  hover($("#tryChart"), $("#tryTip"), g, (i) => readout(h.dates[i], h, i, h.observed[i]));
 }
 const drop = $("#drop");
-$("#file").onchange = (e) => e.target.files[0] && runForecast(e.target.files[0]);
+$("#file").onchange = (e) => { const f = e.target.files[0]; if (f) runForecast(f, `your file “${f.name}”`); e.target.value = ""; };
 ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
 ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
-drop.addEventListener("drop", (e) => e.dataTransfer.files[0] && runForecast(e.dataTransfer.files[0]));
-$("#useSample").onclick = async () => { const blob = await fetch("/api/sample").then((r) => r.blob()); runForecast(new File([blob], "sample.csv", { type: "text/csv" })); };
+drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) runForecast(f, `your file “${f.name}”`); });
+$("#useSample").onclick = async () => {
+  try { const r = await fetch("/api/sample"); if (!r.ok) throw new Error(r.statusText);
+    runForecast(new File([await r.blob()], "sample.csv", { type: "text/csv" }), "the real sample (2 rivers the model never saw, 2013)");
+  } catch (e) { $("#tryStatus").classList.add("err"); $("#tryStatus").textContent = `Could not load the sample: ${e.message}`; } };
 tabs($("#tryTabs"), (h) => { TRY_H = h; drawTry(); }, 1);
 
 /* ---------------- boot ------------------------------------------------------------------------------------------- */
