@@ -51,7 +51,7 @@ validation ([experiments](docs/EXPERIMENTS.md)). 95% confidence intervals from r
 
 | | 1 day | 3 days | 7 days |
 |---|---|---|---|
-| NSE, median over basins | 0.49 → **0.63** [0.57, 0.76] | −0.17 → **0.30** [0.20, 0.36] | −0.43 → **0.15** [0.11, 0.21] |
+| NSE, median over basins | 0.48 → **0.63** [0.57, 0.76] | −0.17 → **0.30** [0.20, 0.36] | −0.43 → **0.15** [0.11, 0.21] |
 | High-flow AUPRC | 0.61 → **0.82** | 0.27 → **0.45** | 0.16 → **0.29** |
 | Extreme-flow AUPRC | 0.19 → **0.50** | 0.06 → **0.15** | 0.03 → **0.10** |
 | Brier skill (high flow) | 0.51 → **0.65** | 0.22 → **0.32** | 0.13 → **0.20** |
