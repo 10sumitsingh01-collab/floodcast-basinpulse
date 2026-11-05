@@ -1,6 +1,6 @@
 """Figures for the report and slides, from logged runs only (real outputs, nothing invented).
 
-    python scripts/make_figures.py --run outputs/lgbm_final --baseline outputs/persistence_baseline
+    python scripts/make_figures.py --run outputs/final_T0 --stress-csv docs/results/official_eval_stress.csv
 
 Writes docs/figures/: hydrographs.png, skill_by_horizon.png, reliability.png, stress.png
 """
@@ -119,18 +119,41 @@ def stress(run: Path, out: Path) -> None:
     plt.close(fig)
 
 
+def stress_eval(csv: Path, out: Path) -> None:
+    """Stress figure from scripts/official_eval.py output: final model vs persistence, unseen basins, 1 day."""
+    s = pd.read_csv(csv)
+    s = s[s.horizon == 1].pivot(index="scenario", columns="model", values="nse_median")
+    rel = (s.drop(index="clean") / s.loc["clean"] - 1) * 100
+    fig, ax = plt.subplots(figsize=(7, 3.6), dpi=150)
+    y = np.arange(len(rel))
+    ax.barh(y - 0.18, rel["BasinPulse"], height=0.34, color=BLUE, label="BasinPulse")
+    ax.barh(y + 0.18, rel["persistence"], height=0.34, color=ORANGE, label="Persistence")
+    ax.set_yticks(y, rel.index)
+    ax.axvline(0, color="black", lw=0.6)
+    ax.set_xlabel("change in median NSE vs clean inputs (%)")
+    ax.set_title("Robustness: 60 unseen basins, 2008-2014, 1-day horizon")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out / "stress.png")
+    plt.close(fig)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run", type=Path, required=True)
     ap.add_argument("--baseline", type=Path, default=Path("outputs/persistence_baseline"))
     ap.add_argument("--data", type=Path, default=Path("data/caravan"))
     ap.add_argument("--out", type=Path, default=Path("docs/figures"))
+    ap.add_argument("--stress-csv", type=Path, default=None,
+                    help="stress results from scripts/official_eval.py (docs/results/official_eval_stress.csv)")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     hydrographs(a.run, a.data, a.out, a.baseline)
     skill(a.run, a.baseline, a.out)
     reliability(a.run, a.out)
-    if (a.run / "stress.csv").exists():
+    if a.stress_csv is not None:
+        stress_eval(a.stress_csv, a.out)
+    elif (a.run / "stress.csv").exists():
         stress(a.run, a.out)
     print(f"figures written to {a.out}")
 

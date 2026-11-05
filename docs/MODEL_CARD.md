@@ -51,7 +51,7 @@ Headline set `geo_temporal` (60 basins never used in training, 2008-10 to 2014-0
 
 | | 1 day | 3 days | 7 days |
 |---|---|---|---|
-| NSE, median over basins | 0.63 (0.49) | 0.30 (−0.17) | 0.15 (−0.43) |
+| NSE, median over basins | 0.63 (0.48) | 0.30 (−0.17) | 0.15 (−0.43) |
 | KGE, median over basins | 0.70 (0.74) | 0.33 (0.42) | 0.15 (0.28) |
 | MAE, mm/day | 0.36 (0.50) | 0.74 (0.90) | 0.91 (1.14) |
 | High-flow AUPRC | 0.82 (0.61) | 0.45 (0.27) | 0.29 (0.16) |
@@ -65,9 +65,14 @@ Ungauged variant (no flow input), validation only: NSE 0.33 / 0.13 / 0.07, still
 
 ## Robustness
 Test set, unseen basins, 1-day horizon, change in median NSE vs clean inputs (persistence in brackets):
-10% of inputs missing −3% (−6%); 30% missing −9% (−33%); 3–7 day gaps −9% (−14%); weather noise −2% (0%);
-latest flow 1 day late −26% (−94%). At 3 and 7 days no scenario costs more than 13%. Weak point: with late flow
-data the 1-day range covers only 60% instead of 80%. Details: `docs/TECHNICAL_REPORT.md` section 9.
+10% of inputs missing −4% (−7%); 30% missing −16% (−29%); 3–7 day gaps −8% (−16%); weather noise −1% (0%);
+latest flow 1 day late −20% (−94%), −18% when its age is reported. At 3 and 7 days no scenario costs more than
+14%. With late flow data the 1-day range covers 60% if the reading's age is not reported and 81% if it is (the
+model takes the age as an input). Details: `docs/TECHNICAL_REPORT.md` section 9.
+
+**Blind test of the live website** (`docs/blind_test/RESULTS.md`): 3 Central European rivers, never seen, through
+the June 2013 flood. NSE 0.57 / 0.22 / 0.01 vs persistence 0.27 / −0.56 / −0.79 over 2013; flood probability
+93–100% one day before each peak, but the peak height was underestimated (forecast 5–12 vs real 20–44 mm/day).
 
 ## Limitations and risks
 - **One country:** CAMELS-US basins only, mostly small-to-medium natural catchments (median 330 km²). No evidence

@@ -8,15 +8,20 @@ on validation splits inside the training data ([EXPERIMENTS.md](EXPERIMENTS.md))
 We forecast daily river flow 1, 3 and 7 days ahead, with a 10–90% range and the probability of high and
 extreme flow, and test the forecasts on river basins never used in training. Data: 299 real CAMELS-US basins
 from Caravan v1.6 (observed USGS flow, ERA5-Land weather, HydroATLAS attributes); 60 basins are held out
-entirely, and test years (2008–2014) follow all training years. Method: per horizon, LightGBM quantile models
-predict the log change from the latest observed flow, with conformal calibration of the range and isotonic
-calibration of event probabilities, trained with 15% of inputs randomly hidden for robustness. On the 60 unseen
-basins in unseen years, median NSE is 0.63 / 0.30 / 0.15 at 1 / 3 / 7 days vs. 0.49 / −0.17 / −0.43 for
-persistence; high-flow AUPRC rises from 0.61 / 0.27 / 0.16 to 0.81 / 0.45 / 0.28; the range covers 81 / 80 /
-79% of observations (target 80%) while being 31% narrower than persistence's at 7 days; false alarms fall from
-5.6 to 2.0 per basin-year at the 1-day horizon. Skill on unseen basins is close to skill on seen basins.
-Main limitations: CAMELS-US only, held-out basins are gauged at prediction time (an ungauged variant is weaker
-but still beats persistence beyond 1 day), and reanalysis rather than operational weather inputs.
+entirely, and test years (2008–2014) follow all training years. Method (final configuration `src.tuning:T0`):
+per horizon, LightGBM models predict the log change from the latest observed flow: a mean regressor for the
+forecast, quantile regressors with conformal calibration for the range, and isotonic-calibrated classifiers
+for event probabilities. Training hides 15% of inputs at random and shows 20% of examples a one-day-old flow
+reading together with its age, and adds 149 extra CAMELS-US training basins that are in no test set. On the 60
+unseen basins in unseen years, median NSE is 0.63 / 0.30 / 0.15 at 1 / 3 / 7 days vs.
+0.48 / -0.17 / -0.43 for persistence; high-flow AUPRC rises from
+0.61 / 0.27 / 0.16 to 0.82 / 0.45 / 0.29; the range covers
+81 / 81 / 79% of observations (target 80%) while being 30% narrower than persistence's at
+7 days; false alarms fall from 5.6 to 2.0 per basin-year at the 1-day horizon. Skill on unseen basins
+matches skill on seen basins, and the same model, unchanged, scores NSE 0.74 / 0.36 at 1 / 3 days on 579
+Central European basins. Main limitations: CAMELS-US training data only, held-out basins are gauged at
+prediction time (an ungauged variant is weaker but still beats persistence beyond 1 day), reanalysis rather
+than operational weather inputs, and flood peaks are underestimated in height.
 
 ## 2. Problem formulation and research hypothesis
 At the end of day t, for basin c, predict flow on t+1, t+3 and t+7 (mm/day), an 80% interval, and
@@ -76,7 +81,7 @@ flow relative to the basin's mean rainfall and its 95th / 99th percentile thresh
 **Target.** r_h = log1p(flow[t+h]) − log1p(flow_obs[t]). The model predicts how much the river will change, in
 relative terms, which is comparable across basins whose flows differ by orders of magnitude.
 
-**Models per horizon h ∈ {1, 3, 7}** (LightGBM 4.7, 300 trees, 63 leaves, learning rate 0.06, row and column
+**Models per horizon h ∈ {1, 3, 7}** (LightGBM 4.7, 500 trees, 63 leaves, learning rate 0.06, row and column
 subsampling 0.8, seed 42):
 1. Quantile regressors at 0.1, 0.5 and 0.9; quantiles sorted per row.
 2. An L2 regressor for the point forecast, back-transformed with Duan's smearing factor (mean forecast).
@@ -86,10 +91,15 @@ subsampling 0.8, seed 42):
    p_extreme ≤ p_high enforced.
 
 **Training.** 20% of the training basins (seeded) are kept out of the trees as calibration basins, so the range
-and probabilities are calibrated on basins the trees never saw, mimicking the unseen-basin test. 300,000 origins
-are sampled from the remaining basins (laptop memory). **Robustness training (H4):** 15% of input values are
-hidden at random before features are built, so the model learns to cope with gaps. Final training on all 239
-training basins: ~5 minutes on an 8-thread, 7 GB laptop.
+and probabilities are calibrated on basins the trees never saw, mimicking the unseen-basin test. 600,000 origins
+are sampled from the remaining basins. **Robustness training (H4):** 15% of input values are hidden at random
+before features are built, so the model learns to cope with gaps. **Late data:** 20% of training examples see
+the flow reading of the day before instead of today's, with its age (`obs_age_days`) as an input, so a late
+reading is recognised as late. **Extra basins:** 149 further CAMELS-US basins that are in no test set are added
+to training only (`scripts/caravan/prepare_extra_train.py`). Benchmark training: ~58 minutes on a shared
+8-thread laptop CPU (`outputs/final_T0/run.json`). The **submitted model** (`models/basinpulse_final.joblib`) is
+the same configuration refitted on all 671 CAMELS-US basins and all years 1981–2014 (8.09 M origins, 25 min,
+1.7 GB peak, 22.4 MB artifact; `train_final.py`).
 
 ## 6. Baseline comparison and ablation study
 All on validation (`val_unseen_basins`: 96 training basins held out in two folds), from [EXPERIMENTS.md](EXPERIMENTS.md):
@@ -102,90 +112,99 @@ All on validation (`val_unseen_basins`: 96 training basins held out in two folds
 | v1 without catchment attributes (H1) | 0.595 | 0.224 | 0.115 | 0.467 | 0.789 |
 | v1 with robustness training (H4) | 0.598 | 0.214 | 0.114 | 0.470 | 0.805 |
 | v1 without any flow input (ungauged) | 0.327 | 0.128 | 0.074 | 0.354 | 0.808 |
-| **Final: H4 + mean** | **0.666** | **0.280** | **0.193** | 0.470 | 0.805 |
+| H4 + mean | 0.666 | 0.280 | 0.193 | 0.470 | 0.805 |
+| H4 + mean + data-age input and delay training | 0.659 | 0.281 | 0.190 | 0.467 | 0.804 |
+| H4 + mean, 2× sample, 500 trees, + 149 extra basins | **0.674** | **0.293** | **0.209** | **0.492** | 0.804 |
 
 - **Biggest effect:** using observed flow at all (ungauged → gauged: 1-day NSE 0.33 → 0.61), then the mean
   forecast (+0.06 NSE at 1 day, +0.15 KGE at 7 days).
 - **H1:** catchment attributes give small, consistent gains in most metrics, inside the confidence intervals.
   Part of the basin's scale information also reaches the model through its flow thresholds.
+- **Data age:** about equal on clean inputs, but keeps the 1-day range calibrated when the flow reading is a
+  day late (coverage 0.57 → 0.81). **More basins and capacity:** raises every unseen-basin metric
+  (extreme-flow AUPRC at 7 days +28%). The final configuration `T0` combines both.
 - **H4:** costs ~0.01 NSE on clean inputs, but raises mean stressed 1-day NSE by 0.025 (30% missing inputs:
   0.518 → 0.588). Adopted by a rule fixed before looking (≥ 0.01 stressed gain, < 0.02 clean loss).
 
 ## 7. Temporal and unseen-basin results
-Test set, final model, median NSE over basins [95% basin-bootstrap CI]:
+Test set, final configuration (`outputs/final_T0`), median NSE over basins [95% basin-bootstrap CI]:
 
 | Test set | Basins | 1 day | 3 days | 7 days |
 |---|---|---|---|---|
-| `temporal` (seen basins, later years) | 239 | 0.678 [0.649, 0.727] | 0.261 [0.224, 0.310] | 0.150 [0.126, 0.180] |
-| `geo` (unseen basins) | 60 | 0.659 [0.547, 0.739] | 0.276 [0.204, 0.357] | 0.171 [0.156, 0.243] |
-| `geo_temporal` (unseen basins, later years) | 60 | 0.634 [0.577, 0.753] | 0.295 [0.195, 0.371] | 0.149 [0.116, 0.205] |
-| persistence, `geo_temporal` | 60 | 0.485 | −0.171 | −0.429 |
+| `temporal` (seen basins, later years) | 239 | 0.676 [0.651, 0.738] | 0.272 [0.222, 0.318] | 0.149 [0.126, 0.190] |
+| `geo` (unseen basins) | 60 | 0.673 [0.548, 0.734] | 0.273 [0.211, 0.363] | 0.188 [0.159, 0.260] |
+| `geo_temporal` (unseen basins, later years) | 60 | 0.632 [0.572, 0.759] | 0.297 [0.205, 0.362] | 0.148 [0.114, 0.205] |
+| persistence, `geo_temporal` | 60 | 0.485 | -0.171 | -0.429 |
 
 Unseen-basin skill is within the confidence intervals of seen-basin skill at every horizon: the model transfers.
-KGE is 0.70 / 0.33 / 0.15 on `geo_temporal`, below persistence (0.74 / 0.42 / 0.28): persistence reproduces the
+KGE is 0.71 / 0.32 / 0.16 on `geo_temporal`, below persistence (0.74 / 0.41 / 0.28): persistence reproduces the
 observed variability exactly by construction, while any forecast that hedges toward the expected value is smoother.
-MAE falls from 0.50 / 0.90 / 1.14 to 0.37 / 0.74 / 0.90 mm/day.
+MAE falls from 0.50 / 0.90 / 1.14 to 0.36 / 0.75 / 0.92 mm/day.
 
 ## 8. Extreme-event and calibration results
-`geo_temporal` (5,976 high-flow and 1,243 extreme days at 1 day ahead):
+`geo_temporal` (5,976 high-flow and 1,243 extreme days at 1 day ahead); persistence in brackets:
 
 | | 1 day | 3 days | 7 days |
 |---|---|---|---|
-| AUPRC high (persistence) | 0.813 (0.609) | 0.446 (0.274) | 0.279 (0.160) |
-| AUPRC extreme (persistence) | 0.493 (0.192) | 0.140 (0.063) | 0.068 (0.034) |
-| Brier skill, high | 0.645 | 0.311 | 0.198 |
-| Recall / precision at p ≥ 0.5 | 0.65 / 0.85 | 0.23 / 0.76 | 0.11 / 0.71 |
-| False alarms per basin-year | 2.0 (5.6) | 1.2 | 0.7 |
-| Range coverage (target 0.80) | 0.811 | 0.796 | 0.788 |
-| Range width, mm/day (persistence) | 0.89 (0.67) | 1.59 (1.78) | 1.99 (2.87) |
+| AUPRC high | 0.820 (0.609) | 0.452 (0.274) | 0.289 (0.160) |
+| AUPRC extreme | 0.500 (0.192) | 0.151 (0.063) | 0.095 (0.034) |
+| Brier skill, high | 0.649 (0.511) | 0.315 (0.221) | 0.198 (0.132) |
+| Recall / precision at p ≥ 0.5 | 0.65 / 0.85 | 0.24 / 0.76 | 0.13 / 0.66 |
+| False alarms per basin-year | 2.0 (5.6) | 1.3 (0.0) | 1.1 (0.0) |
+| Range coverage (target 0.80) | 0.815 (0.803) | 0.807 (0.804) | 0.789 (0.800) |
+| Range width, mm/day | 0.88 (0.67) | 1.59 (1.78) | 2.02 (2.87) |
 
 Probabilities are calibrated (reliability diagram: `docs/figures/reliability.png`). At 3 and 7 days, alerts at a
 fixed 0.5 threshold are precise but miss most events: the probabilities are honest about how uncertain multi-day
 peaks are. Users who prefer fewer missed floods would alert at a lower probability (higher recall, more false alarms).
 
 ## 9. Robustness and efficiency analysis
-Test set, `geo_temporal`, same fitted model with corrupted inputs (fixed seed 42). Relative change of median NSE
-vs clean inputs, persistence → final model (final model's stressed NSE in brackets):
+Test set, `geo_temporal`, the benchmark model with corrupted inputs (fixed seed 42; `scripts/official_eval.py`). Relative change
+of median NSE vs clean inputs, persistence → final model (final model's stressed NSE in brackets; "n/a" where
+persistence's clean NSE is negative, so a relative change is meaningless):
 
 | Scenario | 1 day | 3 days | 7 days |
 |---|---|---|---|
-| 10% of inputs removed | −6% → **−3%** (0.61) | −5% → **−1%** (0.29) | −2% → −1% (0.15) |
-| 30% of inputs removed | −33% → **−9%** (0.58) | +7% → −13% (0.26) | +4% → −6% (0.14) |
-| 3–7 day gaps on ~10% of days | −14% → **−9%** (0.58) | +11% → −7% (0.28) | −3% → +0% (0.15) |
-| Weather noise (10% of sd) | 0% → −2% (0.62) | 0% → −1% (0.29) | 0% → +1% (0.15) |
-| Latest flow observation 1 day late | −94% → **−26%** (0.47) | −32% → **−11%** (0.26) | −12% → **−3%** (0.15) |
+| 10% of inputs removed | -7% → **-4%** (0.61) | n/a → **-10%** (0.27) | n/a → **-2%** (0.15) |
+| 30% of inputs removed | -29% → **-16%** (0.53) | n/a → **-14%** (0.26) | n/a → **-1%** (0.15) |
+| 3–7 day gaps on ~10% of days | -16% → **-8%** (0.58) | n/a → **-1%** (0.29) | n/a → **+2%** (0.15) |
+| Weather noise (10% of sd) | +0% → **-1%** (0.63) | n/a → **-0%** (0.30) | n/a → **+1%** (0.15) |
+| Latest flow observation 1 day late | -94% → **-20%** (0.50) | n/a → **-7%** (0.28) | n/a → **-4%** (0.14) |
+| … 1 day late, with its age reported | -94% → **-18%** (0.52) | n/a → **-5%** (0.28) | n/a → **-3%** (0.14) |
 
-Even under stress the final model stays well above clean persistence at 3 and 7 days. (Persistence "improves"
-in a few 3–7 day cells only because its clean NSE is negative.) Ranges stay calibrated under missing data and
-gaps (coverage 0.79–0.81), **except when the latest flow is a day late: 1-day coverage falls to 0.60**, because the
-model does not know the observation is stale. A deployed version should pass the data age as an input.
-Robustness training (H4) is what keeps these losses small (section 6). Figure: `figures/stress.png`.
+Even under stress the final model stays well above clean persistence at every horizon. Ranges stay calibrated
+under missing data and gaps (1-day coverage 0.80–0.81). When the latest flow reading is a day late and
+its age is not reported, 1-day coverage falls to 0.60; **when the age is reported, as the data-age input
+allows, it stays at 0.81**. Figure: `figures/stress.png`.
 
-**Efficiency** (8-thread, 7 GB RAM Windows laptop, CPU only, `outputs/lgbm_final/run.json`): features for 2.36 M
-origins in ~65 s; training 291 s (per horizon: 3 quantile + 1 mean regressor and 2 classifiers, 240–300 trees
-each, plus calibration); prediction of 1.25 M origins × 3 horizons in 243 s. CPU only; no GPU needed.
+**Efficiency** (judge-style run, `docs/OFFICIAL_STYLE_EVALUATION.md`): `predict.py` forecasts the whole test set,
+1,246,829 origins × 3 horizons for 299 basins, in 12.2 minutes on a laptop CPU with 1.6 GB peak memory; the model
+file is 22.4 MB; no GPU and no network. The public website serves live forecasts within Render's free 512 MB plan
+(measured peak 283 MB).
 
-**Code version.** The final run reports commit `72500f8-dirty`; the "dirty" part was documentation only
-(`git diff 72500f8 -- src/ basinshift_run.py` is empty).
+**Code version.** The final run reports model code commit `d75af6c` (`outputs/final_T0/run.json`).
 
 **Hydrographs** (`figures/hydrographs.png`): on the sharpest peaks the 1-day point forecast underestimates the
 height, but the high-flow probability rises at the onset of each event, which is what an alert needs.
 
 ## 10. Limitations, failure cases and responsible use
 **Failure cases** ([FAILURE_ANALYSIS.md](FAILURE_ANALYSIS.md), per-basin NSE on `geo_temporal`): the model beats
-persistence on 52 of 60 unseen basins at 3 days; no unseen basin has negative NSE at 1 day (2 at 3 days, 6 at
+persistence on 53 of 60 unseen basins at 3 days; no unseen basin has negative NSE at 1 day (2 at 3 days, 5 at
 7 days). Skill is lowest in flat, low-elevation basins with frequent intense rain (3-day NSE correlates with
-high-precipitation frequency −0.39, slope +0.36, elevation +0.32, snow fraction +0.38). Five of the eight worst
+high-precipitation frequency −0.42, slope +0.35, elevation +0.30, snow fraction +0.38). Five of the eight worst
 basins are in the south-central US (USGS parts 07–08), where short, intense storms drive flow and daily data
 cannot resolve their timing.
 Snowmelt and mountain basins are the easiest. The single worst basin at 7 days (camels_09306242: 87 km², steep,
-snow fraction 0.36, NSE −4.2) is an outlier worth inspecting; one such basin moves the mean but not the median.
+snow fraction 0.36, NSE −4.9) is an outlier worth inspecting; one such basin moves the mean but not the median.
 
 **Limitations**
 - CAMELS-US only: one country, mostly natural catchments; global transfer is not shown.
 - Held-out basins are gauged at inference (their past flow is an input). Without any flow input (ungauged
   variant, validation) skill drops to NSE 0.33 / 0.13 / 0.07, still above persistence beyond 1 day.
 - KGE is below persistence: forecasts that hedge toward the expected value are smoother than the observed flow.
+- Flood peaks are underestimated in height (blind test on the June 2013 Central European flood,
+  `docs/blind_test/RESULTS.md`: high-flow probability 93–100% a day ahead on all 3 rivers, but forecast peaks
+  of 5–12 against real 20–44 mm/day). Rainfall forecasts as inputs are the clear next step.
 - Fewer snow-dominated basins in the held-out set than in training (see `SPLIT_SUMMARY.md`).
 - Thresholds are statistical labels (95th/99th percentile), not official flood stages (16.2).
 - Discharge is basin-level; this says nothing about inundation depth or exposure.
@@ -204,12 +223,15 @@ python predict.py --inputs hidden_test.parquet --out submission.jsonl.gz
 pytest tests/test_basinshift_eval.py tests/test_bs_models.py
 ```
 
-**Fresh-clone test (2026-11-05).** The branch was cloned from GitHub into an empty folder, the shared data zip
-was unzipped (hash verified), and:
+**Fresh-clone tests (2026-11-05).** (a) Earlier final model: the branch was cloned from GitHub into an empty
+folder, the shared data zip was unzipped (hash verified), and:
 - all 24 tests passed;
 - `basinshift_run.py` with the final model reproduced the final run's predictions **bit for bit**: all
   3,740,487 rows identical in every column (max absolute difference 0). Seed 42 and fixed thread count make
   LightGBM training deterministic on the same machine.
+(b) Final `main`: an independent agent cloned the repository into an empty folder, installed the pinned
+requirements, loaded the submitted model, ran `predict.py` on the bundled sample (914 origins, 8.4 rules
+passed), ran the website including a live forecast, and ran `pytest` (skips cleanly without the data package).
 
 **Artifacts:** final and validation metric tables in `docs/results/`; run metadata (commit, timings) in
 `docs/results/final_run.json` and `experiments/*.csv`; data package hashes in `prep_manifest.json`;
@@ -220,8 +242,8 @@ was unzipped (hash verified), and:
 ## Draft answers to the defense questions (12.2)
 1. **Evidence of generalization to unseen basins?** 60 basins never in training, stratified across 14
    regions; reported separately as `geo` and `geo_temporal`, with basin-bootstrap CIs. On `geo_temporal`,
-   median NSE 0.63 / 0.30 / 0.15 vs 0.68 / 0.26 / 0.15 on seen basins (`temporal`): inside each other's CIs.
-   The model beats persistence on 52 of 60 unseen basins at 3 days.
+   median NSE 0.63 / 0.30 / 0.15 vs 0.68 / 0.27 / 0.15 on seen basins (`temporal`): inside each other's CIs.
+   The model beats persistence on 53 of 60 unseen basins at 3 days, and transfers unchanged to 579 European basins.
 2. **Inputs unavailable in deployment?** ERA5-Land is reanalysis, available with ~5 days delay; same-day
    observed flow may also arrive late (tested by `obs_delay_1d`).
 3. **How are thresholds defined and frozen?** 95th/99th percentile of each basin's observed flow,
@@ -234,10 +256,10 @@ was unzipped (hash verified), and:
    vs median forecast (+0.06 NSE at 1 day, +0.15 KGE at 7 days). Catchment attributes (H1): small consistent
    gains inside the CIs. Robustness training (H4): +0.025 stressed NSE for −0.01 clean NSE.
 6. **How is uncertainty calibrated?** Ranges: quantile regression plus conformal widening fitted on basins the
-   trees never saw; test coverage 0.81 / 0.80 / 0.79 (target 0.80). Probabilities: isotonic calibration on the same
+   trees never saw; test coverage 0.81 / 0.81 / 0.79 (target 0.80). Probabilities: isotonic calibration on the same
    basins; Brier skill 0.65 / 0.31 / 0.20 and the reliability diagram follows the diagonal.
 7. **Largest failure modes?** Flat, low-elevation basins with frequent intense rain, mostly south-central US
-   (short storms, daily resolution); one small steep basin at 7 days (NSE −4.2); smoothed peaks (KGE below persistence).
+   (short storms, daily resolution); one small steep basin at 7 days (NSE −4.9); peak heights underestimated; smoothed peaks (KGE below persistence).
    Details in `FAILURE_ANALYSIS.md`.
 8. **What before real deployment?** Local validation, operational weather feeds, expert review, monitoring,
    fail-safes, coordination with agencies (16.1).

@@ -161,6 +161,12 @@ def _forecast(file: UploadFile):
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():   # browsers ask for /favicon.ico even when the page names an SVG icon
+    return FileResponse(STATIC / "favicon.svg", media_type="image/svg+xml",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
