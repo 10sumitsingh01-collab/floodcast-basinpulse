@@ -17,11 +17,13 @@ function loadFrames() {
   for (let step = 16; step >= 1; step = Math.floor(step / 2)) for (let i = 0; i < N_FRAMES; i += step) if (!order.includes(i)) order.push(i);
   let k = 0;
   const next = () => { if (k >= order.length) return; const i = order[k++]; const im = new Image();
-    im.onload = () => { frames[i] = im; if (lastDrawn < 0 || Math.abs(i - want) < Math.abs(lastDrawn - want)) draw(want); next(); };
-    im.onerror = next; im.src = src(i); };
+    im.src = src(i);
+    (im.decode ? im.decode() : new Promise((ok, no) => { im.onload = ok; im.onerror = no; }))
+      .then(() => { frames[i] = im; if (lastDrawn < 0 || Math.abs(i - want) < Math.abs(lastDrawn - want)) draw(want); })
+      .catch(() => {}).finally(next); };
   for (let c = 0; c < 6; c++) next();
 }
-function sizeCanvas() { const r = devicePixelRatio || 1; canvas.width = innerWidth * r; canvas.height = innerHeight * r; lastDrawn = -1; draw(want); }
+function sizeCanvas() { const r = Math.max(1, Math.min(devicePixelRatio || 1, 1280 / innerWidth)); canvas.width = innerWidth * r; canvas.height = innerHeight * r; lastDrawn = -1; draw(want); }
 function nearest(i) { for (let d = 0; d < N_FRAMES; d++) { if (frames[i - d]) return i - d; if (frames[i + d]) return i + d; } return -1; }
 function draw(i) {
   const j = nearest(i); if (j < 0 || j === lastDrawn) return;
@@ -65,9 +67,16 @@ function setChapter(i) {
 /* ---------------- scroll handler -------------------------------------------------------------------------- */
 const story = $("#story"), film = $("#film"), stack = $("#stack"), lines = [...document.querySelectorAll("#stackLines li")];
 const bar = $("#progressBar"), topEl = $("#top");
-function onScroll() {
+let shown = 0, raf = 0, lastStatement = null;
+function tick() {
+  raf = 0;
   const r = story.getBoundingClientRect(), total = story.offsetHeight - innerHeight;
-  const p = Math.min(1, Math.max(0, -r.top / total));
+  const target = Math.min(1, Math.max(0, -r.top / total));
+  shown = reduced || Math.abs(target - shown) < 0.0004 ? target : shown + (target - shown) * 0.16;
+  onScroll(shown, r);
+  if (shown !== target) raf = requestAnimationFrame(tick);
+}
+function onScroll(p, r) {
   bar.style.width = `${p * 100}%`;
   const filmEnd = 0.78;
   // the last frames fade to black, so the shrinking card holds the flood at its height (frame ~205)
@@ -76,23 +85,25 @@ function onScroll() {
   // typewriter statement, driven by scroll inside the chapter
   const c = CHAPTERS[chapter];
   if (c.text) { const from = chapter === 0 ? 0 : CHAPTERS[chapter - 1].until, k = Math.min(1, (p - from) / ((c.until - from) * 0.7));
-    const full = c.text(); statement.innerHTML = full.slice(0, Math.ceil(full.length * k)) + (k < 1 ? '<span class="caret">&nbsp;</span>' : ""); }
-  else statement.textContent = "";
+    const full = c.text(), html = full.slice(0, Math.ceil(full.length * k)) + (k < 1 ? '<span class="caret">&nbsp;</span>' : "");
+    if (html !== lastStatement) { statement.innerHTML = html; lastStatement = html; } }
+  else if (lastStatement !== "") { statement.textContent = ""; lastStatement = ""; }
   // final chapter: shrink the film into a tilted card over black, then the stacked lines
   const q = Math.min(1, Math.max(0, (p - filmEnd) / 0.1));
-  const s = 1 - 0.58 * q, tilt = 9 * Math.sin(Math.PI * Math.min(1, q * 1.4));
-  film.style.transform = `perspective(1400px) translateY(${-6 * q}vh) rotateX(${tilt}deg) scale(${s})`;
-  film.style.borderRadius = `${q * 6}px`;
+  const s = 1 - 0.52 * q, tilt = 9 * Math.sin(Math.PI * Math.min(1, q * 1.4));
+  film.style.transform = `perspective(1400px) translateY(${-14 * q}vh) rotateX(${tilt}deg) scale(${s})`;
+  film.style.borderRadius = q > 0 ? "6px" : "0";
   stack.classList.toggle("on", q > 0.6);
   lines.forEach((li, i) => li.classList.toggle("on", p > filmEnd + 0.08 + i * 0.045));
-  const past = r.bottom <= innerHeight * 0.2;
+  const past = r.bottom <= innerHeight * 0.6;
   document.body.classList.toggle("on-panels", past);
-  topEl.classList.toggle("compact", past);
+  topEl.classList.toggle("compact", past || q > 0);   // small title once the card appears: no overlap
   if (past !== onPanels) { onPanels = past; scramble(title, past ? "BASINPULSE" : CHAPTERS[chapter].title); }
   $("#scrollHint").style.opacity = p > 0.02 ? 0 : 1;
 }
-addEventListener("scroll", () => requestAnimationFrame(onScroll), { passive: true });
-addEventListener("resize", () => { sizeCanvas(); onScroll(); });
+const kick = () => { if (!raf) raf = requestAnimationFrame(tick); };
+addEventListener("scroll", kick, { passive: true });
+addEventListener("resize", () => { sizeCanvas(); kick(); });
 
 /* ---------------- API ------------------------------------------------------------------------------------------ */
 const api = (p) => fetch(p).then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)));
@@ -226,8 +237,8 @@ $("#useSample").onclick = async () => { const blob = await fetch("/api/sample").
 tabs($("#tryTabs"), (h) => { TRY_H = h; drawTry(); }, 1);
 
 /* ---------------- boot ------------------------------------------------------------------------------------------- */
-sizeCanvas(); loadFrames(); onScroll();
-api("/api/summary").then((s) => { S = s; renderResults(); onScroll();
+sizeCanvas(); loadFrames(); kick();
+api("/api/summary").then((s) => { S = s; renderResults(); lastStatement = null; chapter = -1; kick();
   const m = s.model.geo_temporal;
   $("#sgFacts").innerHTML = `<li>Ranges hold <b>${Math.round(100 * m.interval_coverage["3"].value)}%</b> of real values (target 80%)</li>
     <li>Late flow data, age reported: range coverage stays at <b>81%</b> (was 57%)</li>

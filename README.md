@@ -64,6 +64,8 @@ Full tables: [docs/results/FINAL_T0_TEST_REPORT.md](docs/results/FINAL_T0_TEST_R
 The **submitted model** (`models/basinpulse_final.joblib`) is the same configuration refitted on all 671
 CAMELS-US basins and all years 1981–2014.
 
+**Judge-style test.** `scripts/official_eval.py` runs the test the way the BASINSHIFT evaluator would: inputs only → `predict.py` (1.25M forecasts, 299 rivers, 12 min on a laptop CPU, 1.6 GB) → 8.4 validation → every section 10 metric, robustness under 6 corruption scenarios, and the 10.2 weighted score with a pre-declared normalization (53.9 / 100 vs 23.7 for persistence; 0 = persistence, 100 = perfect). BasinPulse beats persistence on 83% / 88% / 92% of unseen rivers at 1 / 3 / 7 days. [docs/OFFICIAL_STYLE_EVALUATION.md](docs/OFFICIAL_STYLE_EVALUATION.md)
+
 **Zero-shot on another continent.** Trained on US basins only and applied without retraining to **579 Central
 European basins** (LaMAH-CE: Austria, Germany, Switzerland), 2008–2014: NSE **0.74 / 0.36** at 1 / 3 days
 (persistence 0.68 / 0.26, climatology 0.06 / 0.05), high-flow AUPRC 0.79 vs 0.64, extreme-flow AUPRC 0.39 vs 0.17.

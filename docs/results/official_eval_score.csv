@@ -1,0 +1,7 @@
+component,weight,BasinPulse,persistence
+Forecast skill,25,7.3,0.0
+High-flow event detection,25,4.6,0.0
+Out-of-distribution generalization,20,18.5,3.2
+Calibration and uncertainty,15,9.6,9.5
+Robustness,10,8.9,6.0
+Efficiency,5,5.0,5.0
