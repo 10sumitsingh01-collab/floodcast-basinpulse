@@ -94,3 +94,10 @@ EnsembleT1 = ensemble_of(T1)
 EnsembleT2 = ensemble_of(T2)
 EnsembleT3 = ensemble_of(T3)
 EnsembleT4 = ensemble_of(T4)
+
+
+class ShiftGuardT0(T0):
+    """T0 + ShiftGuard (novelty-aware interval calibration)."""
+    def __init__(self, **kw):
+        kw.setdefault("shift_guard", True)
+        super().__init__(**kw)

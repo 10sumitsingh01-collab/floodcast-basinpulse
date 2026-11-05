@@ -30,7 +30,13 @@ from src.model_features import (FLOW_FEATURES, OBS, OBS_AGE, build_features)  # 
 
 HORIZONS = (1, 3, 7)
 QUANTILES = (0.1, 0.5, 0.9)
-HISTORY_DAYS = 150   # look-back kept from train when predicting (longest window 60 d; API decays)
+HISTORY_DAYS = 150
+# ShiftGuard: catchment traits used to measure how unfamiliar a basin is compared with the training basins
+NOVELTY_ATTRS = ["aridity", "p_mean", "pet_mean", "frac_snow", "high_prec_freq", "low_prec_freq", "p_seasonality",
+                 "ele_mt_sav", "slp_dg_sav", "for_pc_sse", "cly_pc_sav", "snd_pc_sav", "dor_pc_pva", "kar_pc_sse",
+                 "gla_pc_sse", "area_km2"]
+NOVELTY_K = 5
+N_NOVELTY_BINS = 3   # look-back kept from train when predicting (longest window 60 d; API decays)
 
 
 def _lgb_params(seed: int, **kw) -> dict:
@@ -46,7 +52,8 @@ class BasinshiftModel:
                  use_static: bool = True, use_flow_history: bool = True, n_estimators: int = 300,
                  point: str = "median", mask_frac: float = 0.0, delay_frac: float = 0.0,
                  chunk_threshold: int = 6_000_000, chunk_basins: int = 40, lgb_params: dict | None = None,
-                 signatures: bool = False):
+                 signatures: bool = False, shift_guard: bool = False):
+        self.shift_guard = shift_guard          # novelty-aware interval calibration (opt-in)
         self.signatures = signatures            # trailing basin flow signatures (needs a year of look-back)
         self.history_days = 400 if signatures else HISTORY_DAYS
         self.lgb_overrides = dict(lgb_params or {})   # e.g. {"num_leaves": 127}; empty = validated defaults
@@ -85,7 +92,7 @@ class BasinshiftModel:
         n_fit = int(okY.sum()) - n_cal
         pf, pc = min(1.0, self.max_rows / max(n_fit, 1)), min(1.0, (self.max_rows // 2) / max(n_cal, 1))
         thr = thresholds.set_index(ID)
-        acc = {k: [] for k in ("Xf", "Yf", "af", "th_f", "te_f", "Xc", "Yc", "ac", "th_c", "te_c")}
+        acc = {k: [] for k in ("Xf", "Yf", "af", "th_f", "te_f", "if", "Xc", "Yc", "ac", "th_c", "te_c", "ic")}
         groups = dict(tuple(train.groupby(ID, sort=True)))
         for i in range(0, len(basins), self.chunk_basins):
             chunk = pd.concat([groups[b] for b in basins[i:i + self.chunk_basins]], ignore_index=True)
@@ -119,8 +126,10 @@ class BasinshiftModel:
                     acc["a" + tag].append(anc[idx])
                     acc["th_" + tag].append(th_h[idx])
                     acc["te_" + tag].append(th_e[idx])
+                    acc["i" + tag].append(chunk[ID].to_numpy()[idx])
             del variants, inputs, chunk
         cat = {k: (np.vstack(v) if k[0] in "XY" else np.concatenate(v)) for k, v in acc.items()}
+        self._remember_basins(basins, cal_b, cat["ic"], static)
         return (cat["Xf"], cat["Yf"], cat["af"], (cat["th_f"], cat["te_f"]),
                 cat["Xc"], cat["Yc"], cat["ac"], (cat["th_c"], cat["te_c"]), cal_b)
 
@@ -157,6 +166,8 @@ class BasinshiftModel:
         Xf = feats[self.feature_cols].iloc[fit_idx].to_numpy(np.float32)
         Xc = feats[self.feature_cols].iloc[cal_idx].to_numpy(np.float32)
         Yf, Yc, af, ac = Y[fit_idx], Y[cal_idx], anchor[fit_idx], anchor[cal_idx]
+        all_ids = feats[ID].to_numpy()
+        ic = all_ids[cal_idx]
         tf = (thr_h[fit_idx], thr_e[fit_idx])
         tc = (thr_h[cal_idx], thr_e[cal_idx])
         del feats
@@ -180,11 +191,44 @@ class BasinshiftModel:
                 else:
                     Xc, Yc, ac = np.vstack([Xc, Xd]), np.vstack([Yc, Y[sel]]), np.r_[ac, ad[sel]]
                     tc = (np.r_[tc[0], thr_h[sel]], np.r_[tc[1], thr_e[sel]])
+                    ic = np.r_[ic, all_ids[sel]]
             del fd, late
         del inputs
         print(f"  features ready ({time.time() - t0:.0f} s): fit {Xf.shape}, calibration {Xc.shape}, "
               f"{len(cal_b)} calibration basins", flush=True)
+        self._remember_basins(basins, cal_b, ic, static)
         return self._train(Xf, Yf, af, tf, Xc, Yc, ac, tc, t0)
+
+    def _remember_basins(self, basins, cal_b, cal_row_ids, static):
+        """Keep what ShiftGuard needs: the trees' own training basins (reference) and calibration rows' basins."""
+        if not getattr(self, "shift_guard", False):
+            return
+        fit_b = [b for b in basins if b not in cal_b]
+        st = static.drop_duplicates(ID).set_index(ID)
+        ref = self._traits(st, fit_b)
+        self._nov_mu, self._nov_sd = np.nanmean(ref, axis=0), np.nanstd(ref, axis=0) + 1e-9
+        self._nov_ref = np.clip(np.nan_to_num((ref - self._nov_mu) / self._nov_sd), -4, 4)
+        self._cal_row_ids = np.asarray(cal_row_ids)
+        self._cal_static = st
+
+    @staticmethod
+    def _traits(st: pd.DataFrame, ids) -> np.ndarray:
+        cols = [c for c in NOVELTY_ATTRS if c in st.columns]
+        x = st.reindex(list(ids))[cols].to_numpy(float)
+        if "area_km2" in cols:
+            j = cols.index("area_km2")
+            x[:, j] = np.log(np.clip(x[:, j], 1e-3, None))
+        return x
+
+    def novelty(self, static: pd.DataFrame, ids) -> pd.Series:
+        """Mean standardised distance from each basin's catchment traits to its 5 nearest training basins
+        (0 = like a typical training basin; larger = more unfamiliar). Uses no flow data."""
+        u = pd.unique(pd.Series(ids).astype(str))
+        st = static.drop_duplicates(ID).set_index(ID)
+        z = np.clip(np.nan_to_num((self._traits(st, u) - self._nov_mu) / self._nov_sd), -4, 4)   # no single trait dominates
+        d = np.sqrt(((z[:, None, :] - self._nov_ref[None, :, :]) ** 2).sum(-1))
+        k = min(NOVELTY_K, d.shape[1])
+        return pd.Series(np.sort(d, axis=1)[:, :k].mean(axis=1), index=u)
 
     def _train(self, Xf, Yf, af, tf, Xc, Yc, ac, tc, t0) -> "BasinshiftModel":
         for j, h in enumerate(HORIZONS):
@@ -200,6 +244,20 @@ class BasinshiftModel:
             score = np.maximum(lo - r_c, r_c - hi)
             n = len(score)
             self.cqr[h] = float(np.quantile(score, min(1.0, np.ceil((n + 1) * 0.8) / n)))
+            if getattr(self, "shift_guard", False):   # separate widening for familiar / new / very new basins
+                nov = self.novelty(self._cal_static.reset_index(), self._cal_row_ids)
+                bnov = nov.to_numpy()
+                if h == HORIZONS[0]:
+                    self._nov_edges = np.quantile(bnov, np.linspace(0, 1, N_NOVELTY_BINS + 1)[1:-1])
+                row_bin = np.searchsorted(self._nov_edges, nov.reindex(self._cal_row_ids).to_numpy(), side="right")
+                w = []
+                for b in range(N_NOVELTY_BINS):
+                    sb = score[row_bin == b]
+                    nb = len(sb)
+                    w.append(float(np.quantile(sb, min(1.0, np.ceil((nb + 1) * 0.8) / nb))) if nb >= 200
+                             else self.cqr[h])
+                self.cqr_bins = getattr(self, "cqr_bins", {})
+                self.cqr_bins[h] = np.maximum.accumulate(np.array(w))   # never narrower for MORE novel basins
             if self.point == "mean":
                 m = lgb.LGBMRegressor(objective="regression",
                                       **_lgb_params(self.seed, n_estimators=self.n_estimators, **getattr(self, 'lgb_overrides', {})))
@@ -231,21 +289,31 @@ class BasinshiftModel:
         both = pd.concat([hist, test[cols]], ignore_index=True)
         if OBS_AGE in both.columns:          # history rows are on-time readings
             both[OBS_AGE] = both[OBS_AGE].fillna(0.0)
-        aware = self.delay_frac > 0
-        feats = build_features(both, static, thresholds, include_obs_age=aware,
-                                   include_signatures=getattr(self, 'signatures', False)).iloc[len(hist):].reset_index(drop=True)
-        X = feats[self.feature_cols].to_numpy(np.float32)
-        anchor = self._anchor(feats)
-        return self.predict_from_features(X, anchor, test[ID].astype(str).to_numpy(), test[DATE].to_numpy())
+        X, anchor = self.feature_matrix(both, len(hist), static, thresholds)
+        ids = test[ID].astype(str).to_numpy()
+        widen = None
+        if getattr(self, "shift_guard", False):
+            nov = self.novelty(static, ids)
+            self.last_novelty = nov
+            row_bin = np.searchsorted(self._nov_edges, nov.reindex(ids).to_numpy(), side="right")
+            widen = {h: self.cqr_bins[h][row_bin] for h in HORIZONS}
+        return self.predict_from_features(X, anchor, ids, test[DATE].to_numpy(), widen=widen)
+
+    def feature_matrix(self, both: pd.DataFrame, n_hist: int, static: pd.DataFrame, thresholds: pd.DataFrame):
+        """Features of the rows after the first n_hist (history) rows, as the trees see them, plus the anchor."""
+        feats = build_features(both, static, thresholds, include_obs_age=self.delay_frac > 0,
+                               include_signatures=getattr(self, "signatures", False)).iloc[n_hist:].reset_index(drop=True)
+        return feats[self.feature_cols].to_numpy(np.float32), self._anchor(feats)
 
     def predict_from_features(self, X: np.ndarray, anchor: np.ndarray, ids: np.ndarray,
-                              dates: np.ndarray) -> pd.DataFrame:
+                              dates: np.ndarray, widen: dict | None = None) -> pd.DataFrame:
         """Prediction step on a ready feature matrix (columns = self.feature_cols); used by predict()
         and by the feature-importance analysis."""
         parts = []
         for h in HORIZONS:
             qs = np.sort(np.column_stack([self.reg[(h, q)].predict(X) for q in QUANTILES]), axis=1)
-            lo, med, hi = qs[:, 0] - self.cqr[h], qs[:, 1], qs[:, 2] + self.cqr[h]
+            wd = self.cqr[h] if widen is None else widen[h]
+            lo, med, hi = qs[:, 0] - wd, qs[:, 1], qs[:, 2] + wd
             out = pd.DataFrame({ID: ids, DATE: dates})
             out[HORIZON] = h
             out[LO] = np.clip(np.expm1(anchor + np.minimum(lo, med)), 0, None)
