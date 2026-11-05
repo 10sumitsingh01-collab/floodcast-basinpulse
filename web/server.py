@@ -38,9 +38,10 @@ from src import submission  # noqa: E402
 STATIC = ROOT / "web" / "static"
 DATA = STATIC / "data"
 MODEL_PATH = ROOT / "models" / "basinpulse_final.joblib"
-MAX_ROWS = 60_000          # keep live forecasts fast on a laptop (about 40 basin-years)
-MAX_BYTES = 15_000_000     # largest accepted upload
-BUSY = threading.BoundedSemaphore(2)   # at most two live forecasts at once on a shared public host
+# Limits for live forecasts; a small public host sets lower values through the environment (see render.yaml).
+MAX_ROWS = int(os.environ.get("MAX_ROWS", "60000"))       # 60k = about 40 basin-years, fast on a laptop
+MAX_BYTES = int(os.environ.get("MAX_BYTES", "15000000"))  # largest accepted upload
+BUSY = threading.BoundedSemaphore(int(os.environ.get("MAX_LIVE", "2")))  # live forecasts running at once
 app = FastAPI(title="BasinPulse", docs_url="/api/docs")
 _model = None
 _model_lock = threading.Lock()

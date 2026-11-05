@@ -1,0 +1,19 @@
+# Render Blueprint for the public BasinPulse website (free plan: 512 MB; the server peaks below 300 MB).
+# Render dashboard -> New -> Blueprint -> pick this repository. Redeploys on every push to main.
+services:
+  - type: web
+    name: basinpulse
+    runtime: docker
+    plan: free
+    branch: main
+    dockerfilePath: ./deploy/Dockerfile.web
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: MAX_ROWS        # live-forecast upload limit on the small free instance
+        value: "20000"
+      - key: MAX_LIVE        # one live forecast at a time
+        value: "1"
+      - key: MAX_BYTES
+        value: "10000000"

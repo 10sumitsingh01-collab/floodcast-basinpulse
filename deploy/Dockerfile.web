@@ -1,0 +1,23 @@
+# Public BasinPulse website, built from the repository root (used by render.yaml).
+#   docker build -f deploy/Dockerfile.web -t basinpulse-web . && docker run --rm -p 8000:8000 basinpulse-web
+# Copies only what the site needs: no training or test data. The host sets PORT; HOST is all interfaces.
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONIOENCODING=utf-8 HOST=0.0.0.0 PORT=8000
+# LightGBM needs the OpenMP runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1000 app
+WORKDIR /app
+COPY deploy/requirements-web.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY predict.py ./
+COPY src/ src/
+COPY web/ web/
+COPY models/basinpulse_final.joblib models/basinpulse_final.json models/
+COPY scripts/caravan/prepare_caravan.py scripts/caravan/
+RUN touch scripts/__init__.py scripts/caravan/__init__.py && chown -R app /app
+USER app
+
+CMD ["python", "web/server.py"]

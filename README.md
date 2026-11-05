@@ -157,15 +157,13 @@ python web/build_data.py      # only to rebuild web/static/data from outputs/fin
 A scroll-driven story, the headline numbers, a map of the 60 unseen rivers with each river's forecast around its
 largest flood, ShiftGuard drivers, and a live "try the model" upload that runs the submitted model on a CSV.
 
-### 8. Public website (Hugging Face Space)
-```bash
-pip install huggingface_hub
-hf auth login                                         # once, with your own write token
-python deploy/make_space.py --publish <hf-user>/basinpulse
-```
-Bundles only what the site needs (web/, predict.py, src/, the submitted model; no training or test data) into
-`deploy/space_build/` and uploads it as a Docker Space; Hugging Face builds it and serves it at
-`https://<hf-user>-basinpulse.hf.space`. Live uploads are limited to 15 MB / 60,000 rows, two at a time.
+### 8. Public website (Render, free)
+`render.yaml` deploys the site from this repository: on render.com, **New → Blueprint**, pick the repository, and
+Render builds `deploy/Dockerfile.web` and serves it at `https://basinpulse.onrender.com` (or the name it assigns),
+redeploying on every push to `main`. The image holds only what the site needs (web/, predict.py, src/, the submitted
+model; no training or test data). On the free 512 MB plan live uploads are limited to 20,000 rows, one at a time
+(the server peaks below 300 MB). Free services sleep after 15 minutes idle and wake in about a minute.
+`deploy/make_space.py` builds the same site as a Hugging Face Docker Space (needs a Hugging Face PRO account).
 
 ### 9. Offline demo
 Open `docs/demo/index.html` in any browser (offline, single file): a map of the 60 unseen rivers; click one to see
