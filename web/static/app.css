@@ -18,6 +18,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* our display rules must never override the hidden attribute */
 html { scroll-behavior: smooth; }
 body { margin: 0; background: var(--ink); color: var(--paper); font: 16px/1.5 var(--display); -webkit-font-smoothing: antialiased; }
 a { color: inherit; }
@@ -44,6 +45,7 @@ a { color: inherit; }
 .nav a:hover, .nav a:focus-visible { opacity: 1; text-decoration: underline; }
 .nav .cta { color: var(--signal); opacity: 1; }
 body.on-panels .top { background: linear-gradient(var(--ink) 70%, transparent); padding-bottom: 14px; }
+body.on-panels .meta { visibility: hidden; }   /* film chapter captions belong to the film only */
 
 /* ---- the film ---------------------------------------------------------------------------------------- */
 .story { height: 520vh; position: relative; }
@@ -162,3 +164,32 @@ body.on-panels .top { background: linear-gradient(var(--ink) 70%, transparent); 
   .stack-lines li, .lede, .mega { transition: none; }
 }
 @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---- try the model: source line, empty state, sample button, busy state ------------------------------- */
+.try-src { color: var(--mute); margin: 0 0 12px; min-height: 1.5em; }
+.try-src b { color: var(--paper); font-weight: 500; }
+.try-empty { border: 1px solid var(--line); min-height: 280px; display: grid; align-content: center; gap: 10px; padding: 28px;
+  background: repeating-linear-gradient(0deg, transparent 0 39px, rgba(255,255,255,.035) 39px 40px); }
+.try-empty p { margin: 0; max-width: 52ch; }
+.try-empty p:first-child { font: 800 22px/1.2 var(--display); }
+.try-empty .small { text-transform: none; letter-spacing: 0; line-height: 1.6; font-size: 12px; }
+.try-bar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
+.sample-btn { margin: 14px 0 8px; background: var(--signal); color: var(--ink); border: 0; padding: 11px 16px; cursor: pointer;
+  font-size: 12px; font-weight: 500; }
+.sample-btn:hover { filter: brightness(1.08); }
+.sample-btn:disabled { opacity: .55; cursor: progress; }
+.drop.busy { opacity: .55; pointer-events: none; }
+#tryChart { touch-action: pan-y; }
+
+/* ---- phones ---------------------------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  .top { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  .mega { font-size: 8.2vw; }
+  .nav .cta { white-space: nowrap; }
+  .lede { left: var(--pad); right: var(--pad); width: auto; bottom: 15vh; }
+  .statement { left: var(--pad); right: var(--pad); width: auto; font-size: clamp(20px, 6.6vw, 30px) !important; }
+  .foot { left: var(--pad); }
+  .stack-note { display: none; }
+  .driver { grid-template-columns: 120px 1fr 40px; }
+  .try-empty { min-height: 200px; padding: 20px; }
+}

@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..900&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v=3">
+<link rel="stylesheet" href="/static/app.css?v=4">
 </head>
 <body>
 
@@ -123,14 +123,34 @@
         <span class="mega-3">DROP A CSV</span>
         <span class="mono">or click to choose · gauge_id, date, streamflow_obs, weather columns</span>
       </label>
-      <p class="mono small"><a href="/api/sample" id="sampleLink">Download a real sample file</a> (two rivers the model never
-        saw, 2013) or <button class="linkish mono" id="useSample" type="button">run it on the sample now</button>.</p>
+      <button class="sample-btn mono" id="useSample" type="button">▶ Run the real sample</button>
+      <p class="mono small">Two rivers the model never saw, 2013 ·
+        <a href="/api/sample" id="sampleLink" download>download the sample CSV</a> to see the expected columns.</p>
       <p class="mono small status" id="tryStatus" role="status"></p>
     </div>
     <div class="try-out">
-      <div class="tabs mono" id="tryTabs"></div>
-      <svg id="tryChart" viewBox="0 0 760 320" role="img" aria-label="Live forecast"></svg>
-      <p class="mono small" id="tryMeta"></p>
+      <p class="mono try-src" id="trySrc">No forecast yet.</p>
+      <div class="try-empty" id="tryEmpty">
+        <p>Your forecast appears here.</p>
+        <p class="mono small">Upload a CSV on the left, or run the real sample: two rivers the model never saw, 2013.
+          The model then forecasts every day 1, 3 and 7 days ahead, with its 10–90% range and the probability of high flow,
+          and we plot it against what the river really did.</p>
+      </div>
+      <div id="tryResult" hidden>
+        <div class="try-bar">
+          <div class="tabs mono" id="tryTabs" role="tablist" aria-label="Forecast horizon"></div>
+          <div class="tabs mono" id="tryRivers" role="tablist" aria-label="River"></div>
+        </div>
+        <div class="chart-wrap">
+          <svg id="tryChart" viewBox="0 0 760 320" role="img" aria-label="Live forecast against observed flow"></svg>
+          <div class="tip mono" id="tryTip" hidden></div>
+        </div>
+        <div class="chart-legend mono">
+          <span><i class="ln obs"></i>observed (from your file)</span><span><i class="ln fc"></i>BasinPulse forecast</span>
+          <span><i class="sw band"></i>10–90% range</span><span><i class="ln ph"></i>P(high flow), right axis</span>
+          <span><i class="ln thr"></i>high-flow line (95th percentile)</span>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -156,6 +176,6 @@
   </footer>
 </section>
 
-<script src="/static/app.js?v=3"></script>
+<script src="/static/app.js?v=4"></script>
 </body>
 </html>
