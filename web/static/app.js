@@ -153,6 +153,10 @@ async function pickRiver(i) {
   $("#rName").textContent = r.name;
   $("#rMeta").textContent = `${r.id} · ${Number(r.area_km2).toLocaleString()} km² · ${r.novelty_group} catchment (novelty ${fmt(r.novelty)}) · NSE 1/3/7 days ${fmt(r.nse["1"])} / ${fmt(r.nse["3"])} / ${fmt(r.nse["7"])}`;
   DETAIL = await api(`/api/river/${r.id}`); drawChart(); renderAlert();
+  $("#rSrc").innerHTML = `<b>Real data, not a simulation.</b> White line: the flow actually measured at ${usgs(r.id)} `
+    + `(Caravan v1.6 / CAMELS-US), ${DETAIL.dates[0]} to ${DETAIL.dates[DETAIL.dates.length - 1]}, around this river’s largest flood in the test years. `
+    + `Blue line and range: the forecasts BasinPulse actually made in the one-time test run (outputs/final_T0), each using only data from before the forecast was made (1, 3 or 7 days ahead). `
+    + `This river was never used in training. Shown from that logged run, so it appears without any upload.`;
 }
 function lineChart(svg, d, opts) {
   const W = +svg.viewBox.baseVal.width, Hh = +svg.viewBox.baseVal.height, L = 46, R = 46, T = 14, B = 30, n = d.dates.length;
@@ -194,6 +198,9 @@ function hover(svg, tip, g, row) {
   svg.ontouchstart = svg.ontouchmove = (e) => { const t = e.touches[0]; if (t) show(t.clientX, t.clientY); };
   svg.ontouchend = hide;
 }
+// official USGS page of a CAMELS gauge (camels_09210500 -> 09210500), so anyone can check the measured flow
+const usgs = (id) => { const g = String(id).replace(/^camels_/, "");
+  return /^\d{8}$/.test(g) ? `<a href="https://waterdata.usgs.gov/monitoring-location/USGS-${g}/" target="_blank" rel="noopener">USGS gauge ${g}</a>` : esc(id); };
 const pct = (v) => (v == null ? "–" : Math.round(v * 100) + "%");
 const H_LABEL = (h) => `forecast made ${h} day${h > 1 ? "s" : ""} before`;
 function readout(date, h, i, obs) {
@@ -245,6 +252,11 @@ async function runForecast(file, label) {
     TRY = { ...j, label }; TRY_I = 0;
     st.textContent = `${j.n_origins.toLocaleString()} forecast days · ${j.basins.length} river${j.basins.length > 1 ? "s" : ""} · ${j.seconds} s on the server · output ${j.valid_submission ? "passes" : "fails"} the BASINSHIFT format checks`;
     $("#trySrc").innerHTML = `Live forecast of <b>${esc(label)}</b>`;
+    $("#trySrcNote").innerHTML = (label.startsWith("the real sample")
+      ? `<b>Real data, forecast live just now.</b> Inputs: the measured record of ${j.basins.map((x) => usgs(x.id)).join(" and ")} `
+        + `(Caravan v1.6 / CAMELS-US: observed flow and ERA5-Land weather, Oct 2012 – Dec 2013). `
+      : `<b>Forecast live just now from your file.</b> `)
+      + `The white line is the observed flow from the file; the blue line and range are what the submitted model predicted, each using only data from before the forecast was made (1, 3 or 7 days ahead).`;
     $("#tryEmpty").hidden = true; $("#tryResult").hidden = false;
     tabs($("#tryRivers"), (i) => { TRY_I = i; drawTry(); }, 0, j.basins.map((x) => x.id.replace("camels_", "river ")));
     drawTry();
@@ -266,7 +278,7 @@ $("#file").onchange = (e) => { const f = e.target.files[0]; if (f) runForecast(f
 drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) runForecast(f, `your file “${f.name}”`); });
 $("#useSample").onclick = async () => {
   try { const r = await fetch("/api/sample"); if (!r.ok) throw new Error(r.statusText);
-    runForecast(new File([await r.blob()], "sample.csv", { type: "text/csv" }), "the real sample (2 rivers the model never saw, 2013)");
+    runForecast(new File([await r.blob()], "sample.csv", { type: "text/csv" }), "the real sample (2 USGS rivers the model never saw, 2013)");
   } catch (e) { $("#tryStatus").classList.add("err"); $("#tryStatus").textContent = `Could not load the sample: ${e.message}`; } };
 tabs($("#tryTabs"), (h) => { TRY_H = h; drawTry(); }, 1);
 
