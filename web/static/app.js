@@ -45,7 +45,7 @@ const CHAPTERS = [
       return `${Math.round(100 * m.precision_high["1"].value)}% OF ITS FLOOD ALERTS ARE RIGHT. FALSE ALARMS DOWN FROM ${fmt(p.false_alarms_per_basin_year_high["1"].value, 1)} TO ${fmt(m.false_alarms_per_basin_year_high["1"].value, 1)} A YEAR PER RIVER.`; } },
   { until: 1.01, title: "BEFORE IT STRIKES", meta: ["[ THE BENCHMARK ]", "TEST SCORED ONCE", "15 LEAKAGE CHECKS PASS"] },
 ];
-let chapter = -1, scrambleTimer = null;
+let chapter = -1, scrambleTimer = null, onPanels = false;
 function scramble(el, text) {
   if (reduced) { el.textContent = text; return; }
   clearInterval(scrambleTimer);
@@ -85,8 +85,10 @@ function onScroll() {
   film.style.borderRadius = `${q * 6}px`;
   stack.classList.toggle("on", q > 0.6);
   lines.forEach((li, i) => li.classList.toggle("on", p > filmEnd + 0.08 + i * 0.045));
-  document.body.classList.toggle("on-panels", r.bottom <= innerHeight * 0.2);
-  topEl.classList.toggle("compact", r.bottom <= innerHeight * 0.2);
+  const past = r.bottom <= innerHeight * 0.2;
+  document.body.classList.toggle("on-panels", past);
+  topEl.classList.toggle("compact", past);
+  if (past !== onPanels) { onPanels = past; scramble(title, past ? "BASINPULSE" : CHAPTERS[chapter].title); }
   $("#scrollHint").style.opacity = p > 0.02 ? 0 : 1;
 }
 addEventListener("scroll", () => requestAnimationFrame(onScroll), { passive: true });

@@ -18,4 +18,3 @@ outputs/**/model.joblib
 data/final_*/
 models/*.joblib
 !models/basinpulse_final.joblib
-web/static/data/
