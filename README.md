@@ -101,6 +101,10 @@ Loads `models/basinpulse_final.joblib` (trained on all 671 CAMELS-US basins, 198
 Accepts parquet or CSV, common column names (`gauge_id`/`catchment_id`/`station_id`, `date`/`forecast_origin`),
 missing weather columns and missing history / attribute / threshold files; the output is validated against the
 BASINSHIFT 8.4 rules before it is written.
+When no attribute file is given, the real catchment attributes of any of 16,299 known Caravan gauges are looked up
+by `gauge_id` (`models/catchment_attributes.parquet`; your own file always wins). On 80 unseen European rivers this
+raises 3-day NSE 0.26 → 0.35 and high-flow AUPRC 0.38 → 0.43, and brings the range to its 80% target
+([docs/ATTRIBUTE_LOOKUP.md](docs/ATTRIBUTE_LOOKUP.md)).
 
 ## How to run
 

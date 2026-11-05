@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "space_build"
-FILES = ["predict.py", "web/server.py", "models/basinpulse_final.joblib", "models/basinpulse_final.json",
+FILES = ["predict.py", "web/server.py", "models/basinpulse_final.joblib", "models/basinpulse_final.json", "models/catchment_attributes.parquet",
          "scripts/caravan/prepare_caravan.py"]
 TREES = ["src", "web/static"]
 SKIP = shutil.ignore_patterns("__pycache__", "*.pyc", "test_*.py")

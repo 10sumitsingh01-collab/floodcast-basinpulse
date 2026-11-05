@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY predict.py ./
 COPY src/ src/
 COPY web/ web/
-COPY models/basinpulse_final.joblib models/basinpulse_final.json models/
+COPY models/basinpulse_final.joblib models/basinpulse_final.json models/catchment_attributes.parquet models/
 COPY scripts/caravan/prepare_caravan.py scripts/caravan/
 RUN touch scripts/__init__.py scripts/caravan/__init__.py && chown -R app /app
 USER app

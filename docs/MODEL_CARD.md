@@ -23,7 +23,9 @@
 At forecast origin t (end of day t), for one basin: observed flow up to day t; ERA5-Land basin-averaged weather
 up to day t (precipitation, temperature, potential evaporation, snow water equivalent, soil water, radiation,
 dewpoint); 28 static catchment attributes (area, location, climate indices from 1981–2008 weather, HydroATLAS
-terrain, soil, land cover, regulation); the basin's flow thresholds. No input uses data after day t.
+terrain, soil, land cover, regulation); the basin's flow thresholds. No input uses data after day t. On new data without an
+attribute file, the attributes of known Caravan gauges are looked up by id (`models/catchment_attributes.parquet`,
+16,299 gauges; effect on unseen rivers: `docs/ATTRIBUTE_LOOKUP.md`).
 
 ## Training data
 Benchmark run: Caravan v1.6, CAMELS-US, the 239 training basins plus 149 extra CAMELS-US basins outside the test

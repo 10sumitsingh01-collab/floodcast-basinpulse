@@ -46,6 +46,34 @@ STATIC_COLS = ["area_km2", "gauge_lat", "gauge_lon", "p_mean", "pet_mean", "arid
                "crp_pc_sse", "urb_pc_sse", "lka_pc_sse", "dor_pc_pva", "gwt_cm_sav", "cly_pc_sav", "snd_pc_sav",
                "slt_pc_sav", "soc_th_sav", "kar_pc_sse", "prm_pc_sse", "gla_pc_sse", "ppd_pk_sav", "swc_pc_syr",
                "snw_pc_syr"]
+# Real catchment attributes of 16,299 Caravan gauges (scripts/build_attribute_table.py). Used to fill attributes an
+# uploaded file does not provide; a user's own --static always wins. Never contains streamflow.
+KNOWN_ATTRIBUTES = ROOT / "models" / "catchment_attributes.parquet"
+_known: pd.DataFrame | None = None
+
+
+def known_attributes() -> pd.DataFrame:
+    global _known
+    if _known is None:
+        _known = (pd.read_parquet(KNOWN_ATTRIBUTES) if KNOWN_ATTRIBUTES.exists()
+                  else pd.DataFrame(columns=[ID] + STATIC_COLS))
+    return _known
+
+
+def match_known(ids, known: pd.DataFrame) -> dict[str, str]:
+    """Map each basin id to a known gauge: exact id (camels_09210500), or a bare id (09210500) whose Caravan id is
+    unique once the dataset prefix is dropped."""
+    exact = set(known[ID])
+    suffix = known[ID].str.split("_", n=1).str[-1]
+    unique = suffix[~suffix.duplicated(keep=False)]
+    by_suffix = dict(zip(unique, known.loc[unique.index, ID]))
+    out = {}
+    for g in ids:
+        if g in exact:
+            out[g] = g
+        elif "_" not in g and g in by_suffix:
+            out[g] = by_suffix[g]
+    return out
 
 
 def read_any(path: Path) -> pd.DataFrame:
@@ -87,7 +115,9 @@ def continuous(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True)
 
 
-def derive_static(rows: pd.DataFrame, static: pd.DataFrame | None) -> pd.DataFrame:
+def derive_static(rows: pd.DataFrame, static: pd.DataFrame | None, lookup: bool = True) -> pd.DataFrame:
+    """Catchment attributes per basin: the user's file first, then the known Caravan attributes of that gauge
+    (lookup), then climate indices computed from the supplied weather; anything still unknown stays NaN."""
     from scripts.caravan.prepare_caravan import climate_indices  # same recipe as the training data
     ids = sorted(rows[ID].unique())
     st = pd.DataFrame({ID: ids})
@@ -101,6 +131,18 @@ def derive_static(rows: pd.DataFrame, static: pd.DataFrame | None) -> pd.DataFra
             static = static.rename(columns={"area": "area_km2"})
         static[ID] = static[ID].astype(str)
         st = st.merge(static, on=ID, how="left")
+    st.attrs["matched"] = 0
+    if lookup:
+        kn = known_attributes()
+        mp = match_known(ids, kn)
+        st.attrs["matched"] = len(mp)
+        if mp:
+            k = kn.set_index(ID)
+            src = st[ID].map(mp)
+            for c in STATIC_COLS:
+                if c in k.columns:
+                    vals = src.map(k[c]).astype(float)
+                    st[c] = st[c].fillna(vals) if c in st.columns else vals
     need_clim = [c for c in ("p_mean", "pet_mean", "aridity", "frac_snow", "high_prec_freq", "low_prec_freq",
                              "p_seasonality") if c not in st.columns or st[c].isna().any()]
     if need_clim:
@@ -117,7 +159,9 @@ def derive_static(rows: pd.DataFrame, static: pd.DataFrame | None) -> pd.DataFra
     for c in STATIC_COLS:
         if c not in st.columns:
             st[c] = np.nan
-    return st[[ID] + STATIC_COLS]
+    out = st[[ID] + STATIC_COLS].copy()
+    out.attrs["matched"] = st.attrs.get("matched", 0)
+    return out
 
 
 def derive_thresholds(rows: pd.DataFrame, thr: pd.DataFrame | None) -> pd.DataFrame:
@@ -164,6 +208,8 @@ def main() -> int:
     ap.add_argument("--explain", type=Path, default=None,
                     help="also write ShiftGuard extras (parquet): each basin's novelty score and, per forecast, the "
                          "top drivers of P(high flow) at 1/3/7 days")
+    ap.add_argument("--no-attribute-lookup", action="store_true",
+                    help="do not fill missing catchment attributes from models/catchment_attributes.parquet")
     a = ap.parse_args()
     t0 = time.time()
     import joblib
@@ -174,7 +220,9 @@ def main() -> int:
     hist = normalise(read_any(a.history)) if a.history else test.iloc[:0]
     allrows = pd.concat([hist, test], ignore_index=True).drop_duplicates([ID, DATE], keep="last")
     allrows = continuous(allrows[[ID, DATE, OBS] + WEATHER + ([c for c in ["obs_age_days"] if c in allrows] )])
-    static = derive_static(allrows, read_any(a.static) if a.static else None)
+    static = derive_static(allrows, read_any(a.static) if a.static else None, lookup=not a.no_attribute_lookup)
+    if not a.no_attribute_lookup:
+        print(f"catchment attributes: {static.attrs['matched']} of {len(static)} basins found among known gauges")
     thr = derive_thresholds(allrows, read_any(a.thresholds) if a.thresholds else None)
 
     # Every origin is predicted from rows dated <= its own date: the model's features are trailing-only.
