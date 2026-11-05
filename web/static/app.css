@@ -23,7 +23,7 @@ body { margin: 0; background: var(--ink); color: var(--paper); font: 16px/1.5 va
 a { color: inherit; }
 .mono { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 .small { font-size: 11px; color: var(--mute); }
-.mega { font: 900 clamp(44px, 8.4vw, 132px)/.86 var(--display); font-stretch: 112%; letter-spacing: -.02em; margin: 0; text-transform: uppercase; }
+.mega { font: 900 clamp(40px, min(8.4vw, 15vh), 132px)/.86 var(--display); font-stretch: 112%; letter-spacing: -.02em; margin: 0; text-transform: uppercase; }
 .mega-2 { font: 900 clamp(30px, 4.4vw, 68px)/.9 var(--display); font-stretch: 112%; letter-spacing: -.015em; margin: 0; text-transform: uppercase; }
 .mega-3 { font: 900 clamp(24px, 3vw, 44px)/.95 var(--display); font-stretch: 112%; text-transform: uppercase; }
 :focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
@@ -37,8 +37,8 @@ a { color: inherit; }
 .brand .mega { max-width: 11ch; }
 .meta { justify-self: center; }
 .top.compact .mega { font-size: clamp(28px, 3.4vw, 52px); transition: font-size .45s ease; }
-.mega { transition: font-size .45s ease; text-shadow: 0 2px 30px rgba(0,0,0,.25); }
-.meta { display: grid; gap: 2px; padding-top: 6px; opacity: .92; }
+.mega { transition: font-size .45s ease; text-shadow: 0 2px 16px rgba(0,0,0,.3); }
+.meta { display: grid; gap: 2px; padding-top: 6px; opacity: .92; white-space: nowrap; }
 .nav { display: flex; flex-wrap: wrap; gap: 18px; padding-top: 6px; justify-content: flex-end; }
 .nav a { text-decoration: none; opacity: .85; }
 .nav a:hover, .nav a:focus-visible { opacity: 1; text-decoration: underline; }
@@ -55,14 +55,15 @@ body.on-panels .top { background: linear-gradient(var(--ink) 70%, transparent); 
 .lede { position: absolute; left: 50%; bottom: 13vh; width: min(380px, 80vw); margin: 0; font-size: 14px; line-height: 1.45;
   text-shadow: 0 1px 12px rgba(0,0,0,.6); transition: opacity .5s ease, transform .5s ease; }
 .statement { position: absolute; right: var(--pad); bottom: 11vh; width: min(600px, 66vw); color: var(--signal);
-  font-size: clamp(22px, 3.2vw, 50px) !important;
+  font-size: clamp(20px, min(3.2vw, 5.6vh), 50px) !important;
   text-align: left; min-height: 1em; text-shadow: 0 2px 24px rgba(0,0,0,.35); }
 .statement .caret { display: inline-block; width: .5ch; background: var(--signal); animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .stack { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .4s ease; }
 .stack.on { opacity: 1; }
-.stack-note { position: absolute; left: var(--pad); top: 42vh; width: min(270px, 40vw); font-size: 13px; color: var(--paper); margin: 0; }
-.stack-lines { position: absolute; left: 0; right: 0; bottom: 9vh; list-style: none; margin: 0; padding: 0; text-align: center; }
+.stack-note { position: absolute; left: var(--pad); top: 38vh; width: min(270px, 40vw); font-size: 13px; color: var(--paper); margin: 0; }
+.stack-lines.mega-2 { font-size: clamp(22px, min(4.4vw, 6.4vh), 68px); }
+.stack-lines { position: absolute; left: 0; right: 0; bottom: 7vh; list-style: none; margin: 0; padding: 0; text-align: center; }
 .stack-lines li { opacity: 0; transform: translateY(14px); transition: opacity .45s ease, transform .45s ease; }
 .stack-lines li.on { opacity: 1; transform: none; }
 .foot { position: absolute; left: 50%; right: var(--pad); bottom: 18px; display: flex; justify-content: space-between; opacity: .85; }
