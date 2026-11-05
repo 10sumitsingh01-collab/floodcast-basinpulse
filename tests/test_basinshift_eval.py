@@ -134,7 +134,9 @@ def test_stress_scenarios_only_remove_or_perturb(real):
     _, test, _, _ = real
     for sc in stress.SCENARIOS:
         pt = stress.perturb(test, sc, seed=1)
-        assert len(pt) == len(test) and list(pt.columns) == list(test.columns)
+        # the flagged-delay scenario adds the data-age column on purpose; nothing else may change shape
+        extra = ["obs_age_days"] if sc == "obs_delay_1d_flagged" else []
+        assert len(pt) == len(test) and list(pt.columns) == list(test.columns) + extra
         assert set(pt[ID]) == set(test[ID])
     m30 = stress.perturb(test, "mask_30pct", seed=1)
     frac = m30["total_precipitation_sum"].isna().mean() - test["total_precipitation_sum"].isna().mean()

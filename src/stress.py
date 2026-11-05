@@ -18,7 +18,8 @@ SCENARIOS = {
     "mask_30pct": "30% of input values removed at random",
     "gaps_3to7d": "random 3-7 day gaps covering ~10% of days, all inputs missing",
     "noise_weather": "Gaussian noise, sd = 10% of each basin's sd, on weather inputs",
-    "obs_delay_1d": "latest observed flow arrives 1 day late",
+    "obs_delay_1d": "latest observed flow arrives 1 day late (age not reported)",
+    "obs_delay_1d_flagged": "latest observed flow arrives 1 day late, and its age is reported (obs_age_days = 1)",
 }
 
 
@@ -59,11 +60,13 @@ def perturb(test: pd.DataFrame, scenario: str, seed: int = 42) -> pd.DataFrame:
         if PRECIP in df:
             df[PRECIP] = df[PRECIP].clip(lower=0)
 
-    elif scenario == "obs_delay_1d" and OBS in df:
+    elif scenario.startswith("obs_delay_1d") and OBS in df:
         prev = df[[ID, DATE, OBS]].assign(**{DATE: df[DATE] + pd.Timedelta(days=1)})
         df = df.drop(columns=OBS).merge(prev, on=[ID, DATE], how="left")[test.columns]
 
     for c in cols:
         if pd.api.types.is_float_dtype(test[c]):
             df[c] = df[c].astype(test[c].dtype)
+    if scenario == "obs_delay_1d_flagged":
+        df["obs_age_days"] = 1.0   # models that read it know the reading is a day old; others ignore it
     return df

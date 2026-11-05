@@ -3,10 +3,13 @@
 ## Model details
 - **What:** daily river-flow forecaster for 1, 3 and 7 days ahead, with a 10–90% range and probabilities of
   high flow (above the basin's 95th percentile) and extreme flow (above its 99th percentile).
-- **Type:** gradient-boosted trees (LightGBM 4.7). Per horizon: three quantile regressors (10/50/90%),
-  conformal widening of the range, two isotonic-calibrated event classifiers.
+- **Type:** gradient-boosted trees (LightGBM 4.7), configuration `src.tuning:T0` (`DelayAwareModel`, 600k-row
+  sample, 500 trees). Per horizon: a mean regressor (Duan smearing) for the forecast, three quantile regressors
+  (10/50/90%) with conformal widening for the range, two isotonic-calibrated event classifiers. Trained with 15% of
+  inputs hidden and 20% of examples given a one-day-old flow reading plus its age (`obs_age_days`).
 - **Target:** log change from the latest observed flow, `log1p(flow[t+h]) − log1p(flow[t])`.
-- **Code:** `src/bs_models.py` (model and features), `basinshift_run.py` (training, validation, scoring).
+- **Code:** `src/bs_models.py`, `src/model_features.py`, `src/tuning.py`; `basinshift_run.py` (benchmark), `train_final.py`
+  (submitted model), `predict.py` (forecasts on new data).
 - **Version / commit:** see `experiments/basinshift_results.csv` for the final run's commit hash.
 - **Team:** BasinPulse. Licence of code: as chosen by the team. Data licence: CC-BY-4.0 (Caravan, CAMELS-US).
 
@@ -23,8 +26,10 @@ dewpoint); 28 static catchment attributes (area, location, climate indices from 
 terrain, soil, land cover, regulation); the basin's flow thresholds. No input uses data after day t.
 
 ## Training data
-Caravan v1.6, CAMELS-US subset: 239 basins, water years 1981-10 to 2008-09, 2,357,018 daily origins
-(300,000 sampled per model; 20% of basins kept out of the trees for calibration). Real observations only.
+Benchmark run: Caravan v1.6, CAMELS-US, the 239 training basins plus 149 extra CAMELS-US basins outside the test
+set, water years 1981-10 to 2008-09 (600,000 origins sampled per model; 20% of basins kept out of the trees for
+calibration). Submitted model (`models/basinpulse_final.joblib`): the same configuration refitted on all 671
+CAMELS-US basins, 1981–2014 (8.09M origins). Real observations only.
 See `docs/DATA_PROVENANCE.md`.
 
 ## Evaluation data
@@ -41,21 +46,21 @@ recall / precision / false alarms per basin-year at probability 0.5, 10–90% ra
 pinball loss; 95% confidence intervals from resampling basins. Definitions: `docs/BASINSHIFT_EVALUATION.md`.
 
 ## Results
-Final model `src.bs_models:RobustMeanModel`, scored once on the test set (`outputs/lgbm_final/REPORT.md`).
+Final configuration `src.tuning:T0`, scored once on the test set (`docs/results/FINAL_T0_TEST_REPORT.md`).
 Headline set `geo_temporal` (60 basins never used in training, 2008-10 to 2014-09); persistence in brackets.
 
 | | 1 day | 3 days | 7 days |
 |---|---|---|---|
 | NSE, median over basins | 0.63 (0.49) | 0.30 (−0.17) | 0.15 (−0.43) |
 | KGE, median over basins | 0.70 (0.74) | 0.33 (0.42) | 0.15 (0.28) |
-| MAE, mm/day | 0.37 (0.50) | 0.74 (0.90) | 0.90 (1.14) |
-| High-flow AUPRC | 0.81 (0.61) | 0.45 (0.27) | 0.28 (0.16) |
-| Extreme-flow AUPRC | 0.49 (0.19) | 0.14 (0.06) | 0.07 (0.03) |
-| Brier skill, high flow | 0.65 (0.51) | 0.31 (0.22) | 0.20 (0.13) |
-| 10–90% range coverage (target 0.80) | 0.81 (0.80) | 0.80 (0.80) | 0.79 (0.80) |
+| MAE, mm/day | 0.36 (0.50) | 0.74 (0.90) | 0.91 (1.14) |
+| High-flow AUPRC | 0.82 (0.61) | 0.45 (0.27) | 0.29 (0.16) |
+| Extreme-flow AUPRC | 0.50 (0.19) | 0.15 (0.06) | 0.10 (0.03) |
+| Brier skill, high flow | 0.65 (0.51) | 0.32 (0.22) | 0.20 (0.13) |
+| 10–90% range coverage (target 0.80) | 0.82 (0.80) | 0.81 (0.80) | 0.79 (0.80) |
 
-Seen basins in later years (`temporal`): NSE 0.68 / 0.26 / 0.15. Unseen basins, training years (`geo`):
-0.66 / 0.28 / 0.17. Confidence intervals and event counts: `docs/TECHNICAL_REPORT.md` sections 7–8.
+Seen basins in later years (`temporal`): NSE 0.68 / 0.27 / 0.15. Unseen basins, training years (`geo`):
+0.67 / 0.27 / 0.19. Confidence intervals and event counts: `docs/TECHNICAL_REPORT.md` sections 7–8.
 Ungauged variant (no flow input), validation only: NSE 0.33 / 0.13 / 0.07, still above persistence beyond 1 day.
 
 ## Robustness

@@ -197,8 +197,10 @@ snow fraction 0.36, NSE −4.2) is an outlier worth inspecting; one such basin m
 pip install -r requirements.txt
 # data: unzip basinshift_caravan_v1.zip into data/caravan/ (sha256 45a4bba1…f27e849), or rebuild it with
 # scripts/caravan/{fetch_caravan,prepare_caravan,check_leakage}.py (see README)
-python basinshift_run.py --validate --folds 0,1 --model src.bs_models:RobustMeanModel --name val_final
-python basinshift_run.py --model src.bs_models:RobustMeanModel --name lgbm_final
+python basinshift_run.py --validate --folds 0,1 --model src.tuning:T0 --name val_T0
+python basinshift_run.py --model src.tuning:T0 --extra-train data/caravan_extra --name final_T0
+python train_final.py --model src.tuning:T0 --data data/final_camels --out models/basinpulse_final.joblib
+python predict.py --inputs hidden_test.parquet --out submission.jsonl.gz
 pytest tests/test_basinshift_eval.py tests/test_bs_models.py
 ```
 

@@ -52,10 +52,30 @@ def load_model(spec: str):
 
 
 def peak_memory_mb() -> float | None:
+    """Peak resident memory of this process so far, in MB (Windows: peak working set; Linux/macOS: ru_maxrss)."""
     try:
-        import psutil  # optional
-        return psutil.Process(os.getpid()).memory_info().rss / 1e6
+        import psutil
+        mi = psutil.Process(os.getpid()).memory_info()
+        if hasattr(mi, "peak_wset"):
+            return round(mi.peak_wset / 1e6, 1)
     except ImportError:
+        pass
+    try:
+        import resource
+        r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return round(r / 1e6 if platform.system() == "Darwin" else r / 1e3, 1)
+    except ImportError:
+        return None
+
+
+def save_model(model, path: Path) -> float | None:
+    """Pickle the fitted model (joblib, compressed) and return its size in MB."""
+    try:
+        import joblib
+        joblib.dump(model, path, compress=3)
+        return round(path.stat().st_size / 1e6, 2)
+    except Exception as e:  # a model that cannot be pickled still runs; size is then unknown
+        print(f"model not saved: {e}")
         return None
 
 
@@ -82,8 +102,16 @@ def main() -> int:
                     help="score on splits.json validation (unseen-basin folds + last 2 train years); "
                          "never touches test.parquet or test labels")
     ap.add_argument("--folds", default="all", help="station folds to use with --validate, e.g. 0,1")
+    ap.add_argument("--no-temporal", action="store_true",
+                    help="with --validate: unseen-basin folds only (faster, for tuning)")
     ap.add_argument("--val-stress", action="store_true",
                     help="with --validate: also run the 5 stress scenarios on the temporal validation split")
+    ap.add_argument("--extra-train", type=Path, default=None,
+                    help="folder with extra TRAINING basins (train.parquet, static.parquet, thresholds.csv) that are in "
+                         "no test set; added to training only (scripts/caravan/prepare_extra_train.py)")
+    ap.add_argument("--score-only", action="store_true",
+                    help="re-score outputs/<name>/predictions.parquet with the current metrics (no refit; "
+                         "keeps the run's stress.csv and run.json)")
     a = ap.parse_args()
     name = a.name or a.model.replace(":", "_").replace(".", "_")
     out = ROOT / "outputs" / name
@@ -91,6 +119,20 @@ def main() -> int:
     t_all = time.time()
     if a.validate:
         return run_validation(a, out)
+    if a.score_only:
+        test = pd.read_parquet(a.data / "test.parquet")
+        thr = pd.read_csv(a.data / "thresholds.csv", dtype={ID: str})
+        preds = pd.read_parquet(out / "predictions.parquet")
+        submission.assert_valid(preds, test[[ID, DATE]])
+        labels = pd.read_parquet(a.data / "test_labels.parquet")
+        metrics, rel = evaluate.score(preds, labels, thr, n_boot=a.n_boot, seed=a.seed)
+        metrics.to_csv(out / "metrics.csv", index=False)
+        pd.concat([r.assign(slice=k) for k, r in rel.items()]).to_csv(out / "reliability_high.csv", index=False)
+        run = json.loads((out / "run.json").read_text())
+        st = pd.read_csv(out / "stress.csv") if (out / "stress.csv").exists() else None
+        write_report(out, run, metrics, st)
+        print(f"re-scored {name}: {out / 'REPORT.md'}")
+        return 0
 
     bad = check_package(a.data)
     if bad:
@@ -99,6 +141,7 @@ def main() -> int:
     test = pd.read_parquet(a.data / "test.parquet")
     static = pd.read_parquet(a.data / "static.parquet")
     thr = pd.read_csv(a.data / "thresholds.csv", dtype={ID: str})
+    train, static, thr = add_extra(a, train, static, thr)
     fit, predict = load_model(a.model)
 
     # ---- fit + predict (no labels loaded yet) -----------------------------------------
@@ -108,6 +151,8 @@ def main() -> int:
     t0 = time.time()
     preds = predict(model, test, train, static, thr)
     t_pred = time.time() - t0
+    model_mb = save_model(model, out / "model.joblib")
+    mem_after_fit = peak_memory_mb()
     preds[ID] = preds[ID].astype(str)
 
     # ---- submission: validate long table, write 8.3 JSON, re-read and validate the file -------
@@ -148,7 +193,8 @@ def main() -> int:
         "utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "data_manifest_ok": not bad, "seed": a.seed, "n_boot": a.n_boot,
         "fit_seconds": round(t_fit, 1), "predict_seconds": round(t_pred, 1),
-        "total_seconds": round(time.time() - t_all, 1), "memory_mb": peak_memory_mb(),
+        "total_seconds": round(time.time() - t_all, 1), "memory_mb": peak_memory_mb(), "peak_mb_fit_predict": mem_after_fit, "model_mb": model_mb,
+        "predictions_per_second": round(len(preds) / max(t_pred, 1e-9)),
         "python": platform.python_version(), "machine": platform.platform(),
         "n_train_rows": len(train), "n_test_origins": len(test),
     }
@@ -166,6 +212,21 @@ def main() -> int:
 
 
 TARGETS = ["streamflow_h1", "streamflow_h3", "streamflow_h7"]
+
+
+def add_extra(a, train, static, thr):
+    """Append extra training basins (never in a test set). Returns train, static, thresholds."""
+    if not a.extra_train:
+        return train, static, thr
+    x = a.extra_train
+    et = pd.read_parquet(x / "train.parquet")
+    overlap = set(et[ID]) & (set(train[ID]) | set(pd.read_parquet(a.data / "test.parquet", columns=[ID])[ID]))
+    if overlap:
+        raise ValueError(f"extra training basins overlap the benchmark: {sorted(overlap)[:3]}")
+    print(f"extra training basins: {et[ID].nunique()} ({len(et):,} rows)", flush=True)
+    return (pd.concat([train, et[train.columns]], ignore_index=True),
+            pd.concat([static, pd.read_parquet(x / "static.parquet")], ignore_index=True),
+            pd.concat([thr, pd.read_csv(x / "thresholds.csv", dtype={ID: str})], ignore_index=True))
 HORIZON_DAYS = {"streamflow_h1": 1, "streamflow_h3": 3, "streamflow_h7": 7}
 
 
@@ -180,6 +241,14 @@ def run_validation(a, out: Path) -> int:
     static = pd.read_parquet(a.data / "static.parquet")
     thr = pd.read_csv(a.data / "thresholds.csv", dtype={ID: str})
     thr_val = pd.read_csv(a.data / "thresholds_val.csv", dtype={ID: str})
+    n_main = len(train)
+    train, static, thr = add_extra(a, train, static, thr)
+    extra_ids = set(train[ID].iloc[n_main:])
+    if extra_ids:   # extra basins' thresholds for the fit period (same rule as thresholds_val)
+        fe = pd.Timestamp(json.loads((a.data / "splits.json").read_text())["temporal_validation"]["fit_end_inclusive"])
+        ex = train[train[ID].isin(extra_ids) & (train[DATE] <= fe)].dropna(subset=["streamflow"]).groupby(ID)["streamflow"]
+        thr_val = pd.concat([thr_val, pd.DataFrame({"q_high": ex.quantile(0.95), "q_extreme": ex.quantile(0.99),
+                                                    "n_obs": ex.size()}).reset_index()], ignore_index=True)
     splits = json.loads((a.data / "splits.json").read_text())
     fit, predict = load_model(a.model)
     inputs = [c for c in train.columns if c not in ["streamflow"] + TARGETS]
@@ -191,7 +260,7 @@ def run_validation(a, out: Path) -> int:
         t0 = time.time()
         held = {g for g, f in folds.items() if f == k}
         tr = train[~train[ID].isin(held)]
-        va = train[train[ID].isin(held)]
+        va = train[train[ID].isin(held)]     # held-out fold basins (never extra basins)
         model = fit(tr, static, thr)
         p = predict(model, va[inputs], tr, static, thr)
         p[ID] = p[ID].astype(str)
@@ -201,12 +270,24 @@ def run_validation(a, out: Path) -> int:
         timings[f"fold_{k}_seconds"] = round(time.time() - t0, 1)
         print(f"fold {k}: {len(held)} basins, {time.time() - t0:.0f} s", flush=True)
 
+    if a.no_temporal:
+        m1, _ = evaluate.score(pd.concat(preds_all), pd.concat(labels_all), thr, n_boot=a.n_boot, seed=a.seed)
+        m1.to_csv(out / "validation_metrics.csv", index=False)
+        run = {"run": a.name or a.model, "model": a.model, "commit": git_commit(), "mode": "validation-folds-only",
+               "utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "folds": use, **timings,
+               "fit_seconds": "see folds", "predict_seconds": "see folds",
+               "total_seconds": round(time.time() - t_all, 1)}
+        (out / "validation_run.json").write_text(json.dumps(run, indent=2), encoding="utf-8")
+        write_report(out, run, m1, None, sets=["val_unseen_basins"], fname="VALIDATION.md")
+        print(f"\nValidation report: {out / 'VALIDATION.md'}")
+        return 0
+
     t0 = time.time()
     fit_end = pd.Timestamp(splits["temporal_validation"]["fit_end_inclusive"])
     tr = train[train[DATE] <= fit_end].copy()
     for col, h in HORIZON_DAYS.items():  # a target on t+h after fit_end would be a validation label
         tr.loc[tr[DATE] + pd.Timedelta(days=h) > fit_end, col] = float("nan")
-    va = train[train[DATE] > fit_end]
+    va = train[(train[DATE] > fit_end) & ~train[ID].isin(extra_ids)]   # score the benchmark basins only
     model = fit(tr, static, thr_val)
     p = predict(model, va[inputs], tr, static, thr_val)
     p[ID] = p[ID].astype(str)
@@ -266,8 +347,9 @@ def write_report(out: Path, run: dict, metrics: pd.DataFrame, stress_df: pd.Data
                  sets=("temporal", "geo", "geo_temporal"), fname: str = "REPORT.md",
                  stress_slice: str = "geo_temporal") -> None:
     show = ["nse_median", "kge_median", "mae_pooled", "auprc_high", "auprc_extreme", "brier_skill_high",
-            "recall_high", "precision_high", "false_alarms_per_basin_year_high", "interval_coverage",
-            "interval_width"]
+            "recall_high", "precision_high", "false_alarms_per_basin_year_high",
+            "recall_at_budget10_high", "precision_at_budget10_high", "recall_at_budget20_high",
+            "precision_at_budget20_high", "interval_coverage", "interval_width"]
 
     def fmt(r):
         ci = "" if pd.isna(r.ci_low) else f" [{r.ci_low:.3f}, {r.ci_high:.3f}]"
@@ -275,7 +357,9 @@ def write_report(out: Path, run: dict, metrics: pd.DataFrame, stress_df: pd.Data
 
     lines = [f"# BASINSHIFT evaluation: `{run['run']}`", "",
              f"Model `{run['model']}`, commit `{run['commit']}`, {run['utc']}. "
-             f"Fit {run['fit_seconds']} s, predict {run['predict_seconds']} s, total {run['total_seconds']} s.", "",
+             f"Fit {run['fit_seconds']} s, predict {run['predict_seconds']} s, total {run['total_seconds']} s"
+             + (f"; peak memory {run['peak_mb_fit_predict']:.0f} MB, model {run['model_mb']} MB, "
+                f"{run['predictions_per_second']:,} predictions/s" if run.get("model_mb") else "") + ".", "",
              "Values with 95% bootstrap CIs (resampling basins). Event counts are horizon-specific.", ""]
     for ts in sets:
         sub = metrics[metrics.test_set == ts]
