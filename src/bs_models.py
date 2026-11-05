@@ -45,7 +45,10 @@ class BasinshiftModel:
     def __init__(self, seed: int = 42, max_rows: int = 300_000, cal_frac: float = 0.2,
                  use_static: bool = True, use_flow_history: bool = True, n_estimators: int = 300,
                  point: str = "median", mask_frac: float = 0.0, delay_frac: float = 0.0,
-                 chunk_threshold: int = 6_000_000, chunk_basins: int = 40, lgb_params: dict | None = None):
+                 chunk_threshold: int = 6_000_000, chunk_basins: int = 40, lgb_params: dict | None = None,
+                 signatures: bool = False):
+        self.signatures = signatures            # trailing basin flow signatures (needs a year of look-back)
+        self.history_days = 400 if signatures else HISTORY_DAYS
         self.lgb_overrides = dict(lgb_params or {})   # e.g. {"num_leaves": 127}; empty = validated defaults
         # above chunk_threshold training rows, features are built a few basins at a time (memory); the
         # in-memory path below is used otherwise and is unchanged from the validated runs
@@ -90,13 +93,15 @@ class BasinshiftModel:
             if self.mask_frac > 0:
                 for c in inputs.columns.drop([ID, DATE]):
                     inputs.loc[rng.random(len(inputs)) < self.mask_frac, c] = np.nan
-            variants = [(build_features(inputs, static, thresholds, include_obs_age=aware), 1.0)]
+            variants = [(build_features(inputs, static, thresholds, include_obs_age=aware,
+                                   include_signatures=getattr(self, 'signatures', False)), 1.0)]
             if aware:
                 late = inputs.copy()
                 prev = late[[ID, DATE, OBS]].assign(**{DATE: late[DATE] + pd.Timedelta(days=1)})
                 late = late.drop(columns=OBS).merge(prev, on=[ID, DATE], how="left")[inputs.columns]
                 late[OBS_AGE] = 1.0
-                variants.append((build_features(late, static, thresholds, include_obs_age=True), self.delay_frac))
+                variants.append((build_features(late, static, thresholds, include_obs_age=True,
+                                   include_signatures=getattr(self, 'signatures', False)), self.delay_frac))
             if not self.feature_cols:
                 self.feature_cols = self._select(variants[0][0].columns, set(static.columns) - {ID})
             Y = chunk[hcols].to_numpy(float)
@@ -134,7 +139,8 @@ class BasinshiftModel:
             for c in inputs.columns.drop([ID, DATE]):
                 inputs.loc[rng.random(len(inputs)) < self.mask_frac, c] = np.nan
         aware = self.delay_frac > 0
-        feats = build_features(inputs, static, thresholds, include_obs_age=aware)
+        feats = build_features(inputs, static, thresholds, include_obs_age=aware,
+                                   include_signatures=getattr(self, 'signatures', False))
         self.feature_cols = self._select(feats.columns, set(static.columns) - {ID})
         Y = np.column_stack([train[f"streamflow_h{h}"].to_numpy(float) for h in HORIZONS])
         thr_h = feats[ID].map(thresholds.set_index(ID)["q_high"]).to_numpy(float)
@@ -159,7 +165,8 @@ class BasinshiftModel:
             prev = late[[ID, DATE, OBS]].assign(**{DATE: late[DATE] + pd.Timedelta(days=1)})
             late = late.drop(columns=OBS).merge(prev, on=[ID, DATE], how="left")[inputs.columns]
             late[OBS_AGE] = 1.0
-            fd = build_features(late, static, thresholds, include_obs_age=True)
+            fd = build_features(late, static, thresholds, include_obs_age=True,
+                                   include_signatures=getattr(self, 'signatures', False))
             ad = self._anchor(fd)
             for which in ("fit", "cal"):
                 base_idx = fit_idx if which == "fit" else cal_idx
@@ -219,12 +226,14 @@ class BasinshiftModel:
         start = test.groupby(ID)[DATE].min()
         hist = train.loc[train[ID].isin(start.index), [c for c in cols if c in train.columns]]
         first_test = hist[ID].map(start)
-        hist = hist[(hist[DATE] >= first_test - pd.Timedelta(days=HISTORY_DAYS)) & (hist[DATE] < first_test)]
+        look = getattr(self, "history_days", HISTORY_DAYS)
+        hist = hist[(hist[DATE] >= first_test - pd.Timedelta(days=look)) & (hist[DATE] < first_test)]
         both = pd.concat([hist, test[cols]], ignore_index=True)
         if OBS_AGE in both.columns:          # history rows are on-time readings
             both[OBS_AGE] = both[OBS_AGE].fillna(0.0)
         aware = self.delay_frac > 0
-        feats = build_features(both, static, thresholds, include_obs_age=aware).iloc[len(hist):].reset_index(drop=True)
+        feats = build_features(both, static, thresholds, include_obs_age=aware,
+                                   include_signatures=getattr(self, 'signatures', False)).iloc[len(hist):].reset_index(drop=True)
         X = feats[self.feature_cols].to_numpy(np.float32)
         anchor = self._anchor(feats)
         return self.predict_from_features(X, anchor, test[ID].astype(str).to_numpy(), test[DATE].to_numpy())

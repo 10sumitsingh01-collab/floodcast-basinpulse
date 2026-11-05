@@ -25,7 +25,9 @@ PET = "potential_evaporation_sum_FAO_PENMAN_MONTEITH"
 OBS_AGE = "obs_age_days"   # optional input: days between the latest flow reading and the origin
 FLOW_FEATURES = {"anchor", "lq", "lq_lag1", "lq_lag2", "lq_lag3", "lq_lag7", "lq_mean3", "lq_mean7",
                  "lq_mean30", "lq_d1", "lq_d3", "obs_missing7", "anchor_rel_high", "anchor_rel_extreme",
-                 "anchor_rel_pmean", OBS_AGE}
+                 "anchor_rel_pmean", OBS_AGE,
+                 "sig_lq_mean90", "sig_lq_mean365", "sig_lq_std30", "sig_recession30", "sig_runoff_ratio365",
+                 "sig_anchor_rel_mean365"}
 
 
 class _Basins:
@@ -78,11 +80,13 @@ class _Basins:
 
 
 def build_features(inputs: pd.DataFrame, static: pd.DataFrame, thresholds: pd.DataFrame,
-                   include_obs_age: bool = False) -> pd.DataFrame:
+                   include_obs_age: bool = False, include_signatures: bool = False) -> pd.DataFrame:
     """inputs: gauge_id, date, streamflow_obs, weather (no targets). Returns features aligned to inputs' rows.
 
     include_obs_age: add `obs_age_days`, how old the latest flow reading is at the origin (input column of the
-    same name if present, else 0). Off by default so earlier models keep exactly the same feature set."""
+    same name if present, else 0). Off by default so earlier models keep exactly the same feature set.
+    include_signatures: add trailing flow signatures of the basin (mean level over 90/365 days, 30-day variability,
+    recession rate on dry days, 365-day runoff ratio), all from dates <= t. Off by default."""
     if any(c.startswith("streamflow_h") or c == "streamflow" for c in inputs.columns):
         raise ValueError("feature builder received target columns")
     order = np.lexsort((inputs[DATE].to_numpy(), inputs[ID].to_numpy()))
@@ -146,6 +150,16 @@ def build_features(inputs: pd.DataFrame, static: pd.DataFrame, thresholds: pd.Da
     f["anchor_rel_pmean"] = f["anchor"] - np.log1p(f["p_mean"])
     if include_obs_age:
         f[OBS_AGE] = col(OBS_AGE) if OBS_AGE in d.columns else np.zeros(len(d))
+    if include_signatures:   # how this basin behaves, from its own recent record (all trailing)
+        f["sig_lq_mean90"] = b.roll_mean(lq, 90)
+        f["sig_lq_mean365"] = b.roll_mean(lq, 365)
+        m30, m2 = b.roll_mean(lq, 30), b.roll_mean(lq * lq, 30)
+        f["sig_lq_std30"] = np.sqrt(np.clip(m2 - m30 * m30, 0, None))
+        dry = np.isfinite(p) & (p < 1.0)
+        f["sig_recession30"] = b.roll_mean(np.where(dry, f["lq_d1"], np.nan), 30)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            f["sig_runoff_ratio365"] = b.roll_mean(np.expm1(lq), 365) / b.roll_mean(p, 365)
+        f["sig_anchor_rel_mean365"] = f["anchor"] - f["sig_lq_mean365"]
 
     out = pd.DataFrame({k: v.astype(np.float32) for k, v in f.items()})
     inv = np.empty_like(order)

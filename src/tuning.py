@@ -45,6 +45,13 @@ class T3(T0):
         super().__init__(**kw)
 
 
+class T4(T0):
+    """T0 + trailing basin flow signatures (level, variability, recession, runoff ratio)."""
+    def __init__(self, **kw):
+        kw.setdefault("signatures", True)
+        super().__init__(**kw)
+
+
 class SeedEnsemble:
     """Average of independently trained members (different seeds -> different samples, masks, trees).
 
@@ -86,3 +93,4 @@ EnsembleT0 = ensemble_of(T0)
 EnsembleT1 = ensemble_of(T1)
 EnsembleT2 = ensemble_of(T2)
 EnsembleT3 = ensemble_of(T3)
+EnsembleT4 = ensemble_of(T4)
