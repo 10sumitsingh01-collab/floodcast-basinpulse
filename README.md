@@ -139,6 +139,7 @@ pytest
 ```
 Runs on a slice of the real data: metric identities, submission-rule rejections, the JSON Schema, stress
 scenarios, and checks that no feature or prediction uses data from after its forecast date.
+The tests need the data package in `data/caravan/` (step 2); on a clone without it they are skipped, not failed.
 
 ### 6. Docker (optional, isolated environment)
 ```bash

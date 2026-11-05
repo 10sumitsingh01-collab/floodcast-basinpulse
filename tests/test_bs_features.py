@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import time
 import unittest
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -21,13 +23,17 @@ from src.bs_features import (
 )
 
 
+CARAVAN = Path(__file__).resolve().parents[1] / "data" / "caravan"
+
+
+@unittest.skipUnless((CARAVAN / "train.parquet").exists(), "data/caravan not present")
 class TestBasinshiftFeatures(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Load real Caravan data
-        cls.train = pd.read_parquet("data/caravan/train.parquet")
-        cls.test = pd.read_parquet("data/caravan/test.parquet")
-        cls.static = pd.read_parquet("data/caravan/static.parquet")
+        cls.train = pd.read_parquet(CARAVAN / "train.parquet")
+        cls.test = pd.read_parquet(CARAVAN / "test.parquet")
+        cls.static = pd.read_parquet(CARAVAN / "static.parquet")
 
         # Select 3 real basins for detailed property testing
         cls.sample_basins = cls.train["gauge_id"].unique()[:3]
