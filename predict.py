@@ -140,6 +140,18 @@ def derive_thresholds(rows: pd.DataFrame, thr: pd.DataFrame | None) -> pd.DataFr
     return out
 
 
+def write_explanations(model, allrows, is_hist, static, thr, keys, path: Path) -> None:
+    """ShiftGuard extras: novelty per basin and top drivers per forecast (first member of an ensemble)."""
+    from src.explain import explain
+    base = model.members[0] if hasattr(model, "members") else model
+    test, hist = allrows[~is_hist].reset_index(drop=True), allrows[is_hist].reset_index(drop=True)
+    parts = [explain(base, test, hist, static, thr, horizon=h) for h in (1, 3, 7)]
+    ex = keys.merge(pd.concat(parts, ignore_index=True), on=[ID, DATE], how="left")
+    if hasattr(base, "novelty") and hasattr(base, "_nov_ref"):
+        ex["basin_novelty"] = ex[ID].map(base.novelty(static, keys[ID].unique()))
+    ex.to_parquet(path, index=False)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--inputs", type=Path, required=True)
@@ -149,6 +161,9 @@ def main() -> int:
     ap.add_argument("--model", type=Path, default=ROOT / "models" / "basinpulse_final.joblib")
     ap.add_argument("--out", type=Path, default=Path("submission.jsonl.gz"))
     ap.add_argument("--long-out", type=Path, default=None, help="also write long-format predictions (parquet)")
+    ap.add_argument("--explain", type=Path, default=None,
+                    help="also write ShiftGuard extras (parquet): each basin's novelty score and, per forecast, the "
+                         "top drivers of P(high flow) at 1/3/7 days")
     a = ap.parse_args()
     t0 = time.time()
     import joblib
@@ -178,6 +193,8 @@ def main() -> int:
     submission.assert_valid(back, keys)
     if a.long_out:
         preds.to_parquet(a.long_out, index=False)
+    if a.explain:
+        write_explanations(model, allrows, is_hist, static, thr, keys, a.explain)
     print(f"{len(keys):,} forecast origins, {keys[ID].nunique()} basins -> {a.out} "
           f"({a.out.stat().st_size / 1e6:.1f} MB) in {time.time() - t0:.0f} s; validated against BASINSHIFT 8.4")
     return 0

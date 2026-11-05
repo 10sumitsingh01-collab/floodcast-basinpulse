@@ -66,3 +66,19 @@ def test_cli_survives_messy_inputs(setup):
     run("--inputs", d / "messy.csv", "--model", d / "m.joblib", "--out", d / "m.jsonl.gz")  # no history/static/thr
     back = submission.read_jsonl(d / "m.jsonl.gz")
     assert submission.validate(back, te[["gauge_id", "date"]]) == []
+
+
+def test_cli_explain_with_shiftguard(setup, tmp_path):
+    d, m, tr, te, hist, static, thr = setup
+    from src.tuning import ShiftGuardT0
+    g = ShiftGuardT0(max_rows=20_000, n_estimators=30).fit(tr, static, thr)
+    joblib.dump(g, tmp_path / "g.joblib")
+    te.to_parquet(tmp_path / "in.parquet"); hist.to_parquet(tmp_path / "h.parquet")
+    static.to_parquet(tmp_path / "st.parquet"); thr.to_csv(tmp_path / "thr.csv", index=False)
+    run("--inputs", tmp_path / "in.parquet", "--history", tmp_path / "h.parquet", "--static", tmp_path / "st.parquet",
+        "--thresholds", tmp_path / "thr.csv", "--model", tmp_path / "g.joblib", "--out", tmp_path / "s.jsonl.gz",
+        "--explain", tmp_path / "ex.parquet")
+    ex = pd.read_parquet(tmp_path / "ex.parquet")
+    assert len(ex) == 3 * len(te[["gauge_id", "date"]].drop_duplicates())
+    assert ex["driver_1"].notna().all() and ex["basin_novelty"].notna().all()
+    assert set(ex["horizon"]) == {1, 3, 7}
